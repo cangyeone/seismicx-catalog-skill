@@ -20,6 +20,8 @@ python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external -
 
 The final one-shot output is `work/catalog_run/catalog_final.csv`, produced after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps. For production association, prefer GaMMA or REAL over the simple smoke-test associator.
 
+Continuous-waveform phase picking must remain unfiltered. Do not apply bandpass, highpass, or lowpass filters before the PNSN picker or inside the default `pick`/`catalog` detection path. Use filtering only when the user explicitly requests a classic STA/LTA smoke-test experiment or during later response/magnitude processing.
+
 ML magnitude calculation should follow the seedtools-style path: remove response to velocity, simulate/integrate to displacement, measure SME/SMN horizontal amplitudes in micrometers, and apply the selected regional R curve such as `R13`. Treat raw-scaled ML as a smoke-test fallback only.
 
 ## External Tools

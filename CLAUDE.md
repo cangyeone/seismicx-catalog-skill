@@ -11,6 +11,7 @@ python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v vel
 ```
 
 - The final catalog is `work/catalog_run/catalog_final.csv`, after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps.
+- Keep continuous-waveform phase picking unfiltered. Do not bandpass/highpass/lowpass files before the PNSN picker or in the default `pick`/`catalog` path.
 - ML should use the seedtools-style response simulation path: response removal to velocity, velocity-to-displacement simulation, SME/SMN horizontal amplitude measurement in micrometers, and a regional R curve such as `R13`.
 - Use `references/` only as needed:
   - `data-contracts.md` for schemas and converters.

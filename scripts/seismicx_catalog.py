@@ -464,6 +464,7 @@ def estimate_first_motion(
     pre_window_s: float = 0.25,
     post_window_s: float = 0.12,
     min_score: float = 2.0,
+    bandpass: bool = False,
 ) -> tuple[str, str, float]:
     import numpy as np
 
@@ -472,7 +473,8 @@ def estimate_first_motion(
         tr.detrend("demean")
         tr.detrend("linear")
         tr.taper(max_percentage=0.02)
-        tr.filter("bandpass", freqmin=1.0, freqmax=min(20.0, 0.45 * tr.stats.sampling_rate), corners=2, zerophase=True)
+        if bandpass:
+            tr.filter("bandpass", freqmin=1.0, freqmax=min(20.0, 0.45 * tr.stats.sampling_rate), corners=2, zerophase=True)
     except Exception:
         pass
 
@@ -516,6 +518,7 @@ def cmd_init_config(args: argparse.Namespace) -> int:
       phases: [Pg, Sg, Pn, Sn]
       device: cpu
       model: pnsn-v3
+      filter_continuous_waveforms: false
 
     association:
       method: gamma
@@ -603,13 +606,14 @@ def classic_pick_file(path: Path, requested: set[str], args: argparse.Namespace)
             tr.detrend("demean")
             tr.detrend("linear")
             tr.taper(max_percentage=0.02)
-            tr.filter(
-                "bandpass",
-                freqmin=args.freqmin,
-                freqmax=min(args.freqmax, 0.45 * sample_rate),
-                corners=2,
-                zerophase=True,
-            )
+            if args.classic_bandpass:
+                tr.filter(
+                    "bandpass",
+                    freqmin=args.freqmin,
+                    freqmax=min(args.freqmax, 0.45 * sample_rate),
+                    corners=2,
+                    zerophase=True,
+                )
         except Exception as exc:
             eprint(f"preprocess failed for {path} {stream_trace_id(trace)}: {exc}")
             continue
@@ -625,7 +629,7 @@ def classic_pick_file(path: Path, requested: set[str], args: argparse.Namespace)
             amplitude = float(np.nanmax(np.abs(data[onset:amp_stop]))) if amp_stop > onset else float("nan")
             polarity, polarity_quality, polarity_score = ("N", "", 0.0)
             if phase_group(label) == "P" and component == "Z":
-                polarity, polarity_quality, polarity_score = estimate_first_motion(tr, pick_time, min_score=args.polarity_min_score)
+                polarity, polarity_quality, polarity_score = estimate_first_motion(trace, pick_time, min_score=args.polarity_min_score)
             net = getattr(stats, "network", "")
             sta = getattr(stats, "station", "")
             loc = getattr(stats, "location", "")
@@ -918,6 +922,7 @@ def cmd_polarity(args: argparse.Namespace) -> int:
                 pre_window_s=args.pre_window,
                 post_window_s=args.post_window,
                 min_score=args.min_score,
+                bandpass=args.bandpass,
             )
             row["polarity"] = polarity
             row["polarity_quality"] = quality
@@ -2308,8 +2313,9 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--lta", type=float, default=5.0)
     pick.add_argument("--trigger-on", type=float, default=3.0)
     pick.add_argument("--trigger-off", type=float, default=1.5)
-    pick.add_argument("--freqmin", type=float, default=1.0)
-    pick.add_argument("--freqmax", type=float, default=20.0)
+    pick.add_argument("--classic-bandpass", action="store_true", help="Opt-in bandpass for the classic STA/LTA smoke-test picker only; continuous waveform picking is unfiltered by default")
+    pick.add_argument("--freqmin", type=float, default=1.0, help="Classic STA/LTA bandpass low corner, used only with --classic-bandpass")
+    pick.add_argument("--freqmax", type=float, default=20.0, help="Classic STA/LTA bandpass high corner, used only with --classic-bandpass")
     pick.add_argument("--noise-window", type=float, default=2.0)
     pick.add_argument("--signal-window", type=float, default=1.0)
     pick.add_argument("--max-picks-per-trace", type=int, default=20)
@@ -2323,6 +2329,7 @@ def build_parser() -> argparse.ArgumentParser:
     polarity.add_argument("--pre-window", type=float, default=0.25)
     polarity.add_argument("--post-window", type=float, default=0.12)
     polarity.add_argument("--min-score", type=float, default=2.0)
+    polarity.add_argument("--bandpass", action="store_true", help="Opt-in first-motion bandpass; default preserves the unfiltered pick waveform")
     polarity.set_defaults(func=cmd_polarity)
 
     associate = sub.add_parser("associate", help="Associate picks with GaMMA, REAL, or a simple time-window fallback")

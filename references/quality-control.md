@@ -4,6 +4,7 @@ Use this checklist before returning a catalog or publishing derived figures.
 
 ## Picking QC
 
+- Confirm continuous-waveform phase picking used unfiltered waveforms. Do not bandpass/highpass/lowpass data before the PNSN picker; filtering should appear only in explicit classic-picker experiments or later magnitude/response processing.
 - Report total picks by phase and station.
 - Flag stations with abnormal pick counts or no picks.
 - Remove duplicate picks within a small station-phase time window unless the user intentionally wants multiple candidate picks.

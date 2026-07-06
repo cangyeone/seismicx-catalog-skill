@@ -9,7 +9,7 @@ Agent-friendly workflows and helper tools for full earthquake detection and auto
 This repository packages a publishable, agent-agnostic skill for the full earthquake detection workflow, from continuous waveform directories to a final catalog with location, magnitude, and focal-mechanism products:
 
 - Analyze waveform directory structure and scan MSEED, SAC, SEED, and other ObsPy-readable formats.
-- Detect earthquake phases and pick user-selected arrivals such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
+- Detect earthquake phases and pick user-selected arrivals such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model. Continuous-waveform picking is intentionally unfiltered; the classic picker is only a smoke-test fallback.
 - Associate picks with GaMMA or REAL, with local build support for REAL.
 - Locate events with an explicit velocity model, including a hook for `cangyeone/bayes_location`.
 - Calculate local magnitude ML with seedtools-style response simulation, horizontal-component amplitude measurement, regional R curves, and station-level outputs.
@@ -60,6 +60,8 @@ python scripts/seismicx_catalog.py locate -p work/picks_with_polarity.csv -s sta
 python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml --region R13 -o work/events_ml.csv --station-output work/station_ml.csv
 python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv
 ```
+
+Do not bandpass, highpass, or lowpass continuous waveforms before the `pick` or `catalog` phase-detection step. The bundled PNSN model expects the original waveform stream. Filtering is only an explicit non-default option for classic STA/LTA smoke tests and for later response/magnitude processing.
 
 Optional local tool builds:
 

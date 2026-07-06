@@ -24,7 +24,7 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
    `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`
 4. Inspect bundled models when needed:
    `python scripts/seismicx_catalog.py list-models`
-5. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Use `classic` only as a no-model smoke-test fallback:
+5. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Do not apply bandpass, highpass, or lowpass filtering to continuous waveforms before or during phase picking. Use `classic` only as a no-model smoke-test fallback:
    `python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
 6. If REAL, HASH, pnsn, `bayes_location`, or `seismological-ai-tools` are needed locally, download/build them before the dependent step:
    `python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json`
@@ -54,6 +54,7 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
 ## Operating Rules
 
 - Do not commit or publish raw waveform archives, generated catalogs, large model weights, compiled binaries, `.so` files, or external cloned repositories unless the user explicitly asks. Compact in-house bundled models listed in `assets/models/model_registry.json` are part of this skill.
+- Keep continuous-waveform phase picking unfiltered. Do not pre-filter files for the picker, and do not add bandpass/highpass/lowpass processing to the PNSN picking path. Filtering belongs only to explicitly requested classic-picker experiments or to later response/magnitude processing.
 - Keep each intermediate artifact explicit: waveform scan, picks, association assignments, located events, station magnitudes, polarity table, and plots.
 - Record the selected phases, picker, association method, velocity model, magnitude method, response source, regional R curve, and external tool commit paths in the final run notes.
 - Treat automatic catalogs as candidates until QC checks pass: station coverage, duplicate picks, event residuals, ML outliers, first-motion quality, and map sanity.
