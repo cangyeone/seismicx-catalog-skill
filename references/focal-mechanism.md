@@ -7,7 +7,7 @@ Use this reference before producing HASH or pyhash focal-mechanism solutions.
 The helper estimates first motion from vertical P picks:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py polarity \
+python scripts/seismicx_catalog.py polarity \
   -p work/picks.csv \
   -o work/picks_with_polarity.csv
 ```
@@ -37,7 +37,7 @@ Keep a table of excluded events and exclusion reasons.
 The local project includes a `pyhash`-style source tree with `src/Makefile` that builds a f2py extension. The helper can attempt this build:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py build-tools \
+python scripts/seismicx_catalog.py build-tools \
   --tool hash \
   --hash-source ./pyhash \
   --tools-dir external \

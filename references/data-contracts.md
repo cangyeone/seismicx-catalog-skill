@@ -8,7 +8,7 @@ Use these contracts when normalizing inputs and exchanging data between pickers,
 - Preserve the original file path in all downstream pick rows as `waveform_path`.
 - Prefer one trace id format everywhere: `NET.STA.LOC.CHA`. Empty location codes may be represented as an empty field in CSV and omitted only in display text.
 - Never assume a directory naming convention. Always scan headers first with:
-  `python seismicx-catalog/scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv`
+  `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv`
 
 ## Station Metadata
 

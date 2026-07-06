@@ -15,19 +15,19 @@ The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable wav
 
 1. Confirm inputs: waveform directory, station metadata, response or StationXML if ML is required, velocity model, desired phases, and preferred association/location engines.
 2. Scan waveforms first:
-   `python seismicx-catalog/scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`
+   `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`
 3. Pick phases. Let the user choose phases such as `P,S`, `Pg,Sg`, or `Pn,Sn`. Use SeisBench/AI models when available; otherwise use the classic picker as a documented fallback:
-   `python seismicx-catalog/scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --phases Pg,Sg --picker classic`
+   `python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --phases Pg,Sg --picker classic`
 4. If REAL, HASH, or pnsn are needed locally, build or clone them before the dependent step:
-   `python seismicx-catalog/scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json`
+   `python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json`
 5. Associate picks with the user's selected engine:
-   `python seismicx-catalog/scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv`
+   `python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv`
 6. Locate associated events. Always require a velocity model for production work. Use the grid solver for a baseline, or export/run `cangyeone/bayes_location` through `--method bayes` when the user requests it.
 7. Calculate ML only after confirming amplitude units and response metadata:
-   `python seismicx-catalog/scripts/seismicx_catalog.py magnitude-ml -e work/located_events.csv -p work/picks.csv -s stations.csv --inventory stations.xml -o work/events_ml.csv --station-output work/station_ml.csv`
+   `python scripts/seismicx_catalog.py magnitude-ml -e work/located_events.csv -p work/picks.csv -s stations.csv --inventory stations.xml -o work/events_ml.csv --station-output work/station_ml.csv`
 8. Analyze and plot:
-   `python seismicx-catalog/scripts/seismicx_catalog.py analyze -e work/events_ml.csv -o work/activity.json --rate-output work/daily_counts.csv`
-   `python seismicx-catalog/scripts/seismicx_catalog.py plot-map -e work/events_ml.csv -s stations.csv -o work/catalog_map.png`
+   `python scripts/seismicx_catalog.py analyze -e work/events_ml.csv -o work/activity.json --rate-output work/daily_counts.csv`
+   `python scripts/seismicx_catalog.py plot-map -e work/events_ml.csv -s stations.csv -o work/catalog_map.png`
 9. For focal mechanisms, compute or QC P first motions, then run HASH/pyhash only for events with enough azimuthal coverage and reliable polarities.
 
 ## Reference Routing

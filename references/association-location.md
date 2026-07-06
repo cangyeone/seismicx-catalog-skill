@@ -23,7 +23,7 @@ Use the helper's `simple` method only as a smoke test for tiny examples. Do not 
 The helper can clone and build REAL into a local tools directory:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py build-tools \
+python scripts/seismicx_catalog.py build-tools \
   --tool real \
   --tools-dir external \
   -o work/build_manifest.json
@@ -34,7 +34,7 @@ If the automatic Makefile search fails, inspect `external/REAL`, read its README
 REAL command execution is project-specific because different deployments convert picks into REAL input files differently. The helper prepares a workspace and can run a template:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py associate \
+python scripts/seismicx_catalog.py associate \
   --method real \
   -p work/picks.csv \
   -s stations.csv \
@@ -48,7 +48,7 @@ python seismicx-catalog/scripts/seismicx_catalog.py associate \
 Install GaMMA and run:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py associate \
+python scripts/seismicx_catalog.py associate \
   --method gamma \
   -p work/picks.csv \
   -s stations.csv \
@@ -67,7 +67,7 @@ Tune `dbscan_eps`, `oversampling_factor`, `min_picks_per_eq`, `max_sigma11`, and
 The grid locator is a baseline, not a replacement for a production locator. Use it to create a transparent first catalog or to validate association output:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py locate \
+python scripts/seismicx_catalog.py locate \
   --method grid \
   -p work/picks_associated.csv \
   -s stations.csv \
@@ -90,7 +90,7 @@ Use `cangyeone/bayes_location` when the user explicitly wants Bayesian location 
 Export a JSON payload if no adapter command exists yet:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py locate \
+python scripts/seismicx_catalog.py locate \
   --method bayes \
   -p work/picks_associated.csv \
   -s stations.csv \
@@ -101,7 +101,7 @@ python seismicx-catalog/scripts/seismicx_catalog.py locate \
 Run a local adapter command when available:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py locate \
+python scripts/seismicx_catalog.py locate \
   --method bayes \
   -p work/picks_associated.csv \
   -s stations.csv \

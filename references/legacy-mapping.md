@@ -33,7 +33,7 @@ The local `pyhash` tree is useful for HASH integration, but contains compiled ar
 Clone `cangyeone/pnsn` locally when the user needs PNSN-specific pickers, station conventions, or examples:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py build-tools --tool pnsn --tools-dir external
+python scripts/seismicx_catalog.py build-tools --tool pnsn --tools-dir external
 ```
 
 Keep it as a local reference or external dependency unless the user asks to vendor selected files.

@@ -19,12 +19,11 @@ This repository packages a publishable Codex skill for end-to-end earthquake aut
 ## Repository Layout
 
 ```text
-seismicx-catalog/
-  SKILL.md
-  agents/openai.yaml
-  scripts/seismicx_catalog.py
-  references/
-  assets/
+SKILL.md
+agents/openai.yaml
+scripts/seismicx_catalog.py
+references/
+assets/
 logo.png
 README.md
 LICENSE
@@ -35,18 +34,18 @@ Large waveform examples, trained model weights, compiled binaries, and external 
 ## Quick Start
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py init-config -o work/seismicx_catalog.yaml
-python seismicx-catalog/scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv
-python seismicx-catalog/scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --phases Pg,Sg
-python seismicx-catalog/scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv
-python seismicx-catalog/scripts/seismicx_catalog.py locate -p work/picks_associated.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
+python scripts/seismicx_catalog.py init-config -o work/seismicx_catalog.yaml
+python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv
+python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --phases Pg,Sg
+python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv
+python scripts/seismicx_catalog.py locate -p work/picks_associated.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
 ```
 
 Optional local tool builds:
 
 ```bash
-python seismicx-catalog/scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json
-python seismicx-catalog/scripts/seismicx_catalog.py build-tools --tool hash --hash-source ./pyhash -o work/hash_build_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool hash --hash-source ./pyhash -o work/hash_build_manifest.json
 ```
 
 ## Related Tools
