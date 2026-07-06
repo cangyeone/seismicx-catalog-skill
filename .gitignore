@@ -1,0 +1,30 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.so
+*.o
+*.dylib
+*.dll
+*.exe
+
+# Local legacy/reference trees
+seedtools.share.version/
+pyhash/
+pnsn/
+external/
+
+# Waveforms, model weights, and generated products
+*.mseed
+*.miniseed
+*.seed
+*.sac
+*.segy
+*.sgy
+*.jit
+*.onnx
+*.pt
+*.pth
+*.ckpt
+odata/
+work/
+catalog_out/
