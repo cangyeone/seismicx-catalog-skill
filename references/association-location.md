@@ -54,6 +54,7 @@ python scripts/seismicx_catalog.py associate \
   -s stations.csv \
   -o work/events_gamma.csv \
   --assignments work/assignments.csv \
+  --associated-picks work/picks_associated.csv \
   --vp 6.0 \
   --vs 3.5 \
   --min-picks-per-eq 5 \
@@ -77,7 +78,7 @@ python scripts/seismicx_catalog.py locate \
 
 Requirements:
 
-- Picks must include `event_id`.
+- Picks must include `event_id`; generate this with `associate --associated-picks` or an equivalent external converter.
 - Station coordinates must be valid.
 - Velocity model must be supplied for production results.
 

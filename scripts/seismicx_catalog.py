@@ -81,6 +81,20 @@ EVENT_FIELDS = [
     "method",
 ]
 
+MECHANISM_FIELDS = [
+    "event_id",
+    "mechanism_strike",
+    "mechanism_dip",
+    "mechanism_rake",
+    "mechanism_aux_strike",
+    "mechanism_aux_dip",
+    "mechanism_aux_rake",
+    "mechanism_n_polarities",
+    "mechanism_misfit_fraction",
+    "mechanism_quality",
+    "mechanism_method",
+]
+
 STATION_FIELDS = [
     "station_id",
     "network",
@@ -285,6 +299,21 @@ def import_obspy() -> Any:
 def read_waveform(path: str | Path, headonly: bool = False) -> Any:
     obspy = import_obspy()
     return obspy.read(str(path), headonly=headonly)
+
+
+def waveform_path_tokens(value: str | Path) -> list[str]:
+    return [part for part in str(value).split(";") if part]
+
+
+def read_waveform_field(value: str | Path, headonly: bool = False) -> Any:
+    paths = waveform_path_tokens(value)
+    if len(paths) <= 1:
+        return read_waveform(paths[0] if paths else value, headonly=headonly)
+    obspy = import_obspy()
+    stream = obspy.Stream()
+    for path in paths:
+        stream += obspy.read(path, headonly=headonly)
+    return stream
 
 
 def read_stations(path: str | Path) -> dict[str, Station]:
@@ -863,7 +892,7 @@ def cmd_polarity(args: argparse.Namespace) -> int:
             continue
         try:
             if path not in cache:
-                cache[path] = read_waveform(path)
+                cache[path] = read_waveform_field(path)
             trace = select_trace_for_pick(cache[path], row, prefer_vertical=True)
             if trace is None:
                 continue
@@ -933,7 +962,21 @@ def cmd_associate_simple(args: argparse.Namespace) -> int:
     write_csv_rows(args.output, events, EVENT_FIELDS)
     if args.assignments:
         write_csv_rows(args.assignments, assignments)
+    if args.associated_picks:
+        write_csv_rows(args.associated_picks, rows, PICK_FIELDS)
     return 0
+
+
+def assignment_event_id(row: dict[str, Any]) -> str:
+    for key in ("event_id", "event_index", "event_idx", "cluster_index", "id"):
+        value = row.get(key)
+        if value not in (None, ""):
+            try:
+                return f"ev{int(float(value)) + 1:06d}"
+            except (TypeError, ValueError):
+                text = str(value)
+                return text if text.startswith("ev") else f"ev{text}"
+    return ""
 
 
 def cmd_associate_gamma(args: argparse.Namespace) -> int:
@@ -1014,11 +1057,23 @@ def cmd_associate_gamma(args: argparse.Namespace) -> int:
         method=args.gamma_method,
     )
     catalogs.to_csv(args.output, index=False)
+    assignment_df = pd.DataFrame(assignments)
     if args.assignments:
-        assignment_df = pd.DataFrame(assignments)
         if len(assignment_df) and "pick_index" in assignment_df.columns:
             assignment_df["pick_id"] = assignment_df["pick_index"].apply(lambda idx: pick_ids[int(idx)] if int(idx) < len(pick_ids) else "")
         assignment_df.to_csv(args.assignments, index=False)
+    if args.associated_picks:
+        associated = [dict(row) for row in picks]
+        if len(assignment_df):
+            for record in assignment_df.to_dict("records"):
+                pick_index = record.get("pick_index")
+                try:
+                    index = int(pick_index)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= index < len(associated):
+                    associated[index]["event_id"] = assignment_event_id(record)
+        write_csv_rows(args.associated_picks, associated, PICK_FIELDS)
     eprint(f"gamma_events={len(catalogs)}")
     return 0
 
@@ -1405,7 +1460,7 @@ def cmd_magnitude(args: argparse.Namespace) -> int:
             continue
         try:
             if waveform_path not in stream_cache:
-                stream_cache[waveform_path] = read_waveform(waveform_path)
+                stream_cache[waveform_path] = read_waveform_field(waveform_path)
             stream = stream_cache[waveform_path]
             pick_time = obspy.UTCDateTime(reference_pick["time"])
             start = pick_time + args.window_start
@@ -1448,6 +1503,222 @@ def cmd_magnitude(args: argparse.Namespace) -> int:
     if args.station_output:
         write_csv_rows(args.station_output, station_rows)
     eprint(f"events_with_ml={sum(1 for vals in event_magnitudes.values() if vals)} station_magnitudes={len(station_rows)}")
+    return 0
+
+
+def polarity_sign(value: str) -> int | None:
+    text = (value or "").upper()
+    if text == "U":
+        return 1
+    if text == "D":
+        return -1
+    return None
+
+
+def moment_tensor_ned(strike: float, dip: float, rake: float) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
+    strike_r = math.radians(strike)
+    dip_r = math.radians(dip)
+    rake_r = math.radians(rake)
+    sd, cd = math.sin(dip_r), math.cos(dip_r)
+    sl, cl = math.sin(rake_r), math.cos(rake_r)
+    sp, cp = math.sin(strike_r), math.cos(strike_r)
+    s2p, c2p = math.sin(2.0 * strike_r), math.cos(2.0 * strike_r)
+    s2d, c2d = math.sin(2.0 * dip_r), math.cos(2.0 * dip_r)
+
+    mnn = -(sd * cl * s2p + s2d * sl * sp * sp)
+    mee = sd * cl * s2p - s2d * sl * cp * cp
+    mdd = s2d * sl
+    mne = sd * cl * c2p + 0.5 * s2d * sl * s2p
+    mnd = -(cd * cl * cp + c2d * sl * sp)
+    med = -(cd * cl * sp - c2d * sl * cp)
+    return ((mnn, mne, mnd), (mne, mee, med), (mnd, med, mdd))
+
+
+def p_radiation_sign(moment: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]], ray: tuple[float, float, float]) -> int:
+    amplitude = 0.0
+    for i in range(3):
+        for j in range(3):
+            amplitude += ray[i] * moment[i][j] * ray[j]
+    return 1 if amplitude >= 0.0 else -1
+
+
+def ray_vector_ned(event: dict[str, str], station: Station) -> tuple[float, float, float] | None:
+    event_lat = parse_float(event.get("latitude"))
+    event_lon = parse_float(event.get("longitude"))
+    depth = max(parse_float(event.get("depth_km"), 0.0), 0.0)
+    if not math.isfinite(event_lat) or not math.isfinite(event_lon):
+        return None
+    east_km, north_km = project_lonlat(station.longitude, station.latitude, event_lon, event_lat)
+    down_km = -depth
+    norm = math.sqrt(north_km * north_km + east_km * east_km + down_km * down_km)
+    if norm <= 0.0:
+        return None
+    return north_km / norm, east_km / norm, down_km / norm
+
+
+def auxiliary_plane_safe(strike: float, dip: float, rake: float) -> tuple[str, str, str]:
+    try:
+        from obspy.imaging.beachball import aux_plane
+
+        aux_strike, aux_dip, aux_rake = aux_plane(strike, dip, rake)
+        return f"{aux_strike:.1f}", f"{aux_dip:.1f}", f"{aux_rake:.1f}"
+    except Exception:
+        return "", "", ""
+
+
+def mechanism_quality(n_polarities: int, misfit: float, min_polarities: int) -> str:
+    if n_polarities < min_polarities:
+        return "insufficient"
+    if misfit <= 0.15 and n_polarities >= max(12, min_polarities):
+        return "A"
+    if misfit <= 0.25:
+        return "B"
+    if misfit <= 0.35:
+        return "C"
+    return "D"
+
+
+def solve_first_motion_grid(event: dict[str, str], picks: list[dict[str, str]], stations: dict[str, Station], args: argparse.Namespace) -> dict[str, Any]:
+    observations: list[tuple[int, tuple[float, float, float]]] = []
+    for row in picks:
+        if phase_group(row.get("phase", "")) != "P":
+            continue
+        sign = polarity_sign(row.get("polarity", ""))
+        if sign is None:
+            continue
+        sta = station_for_pick(row, stations)
+        if sta is None:
+            continue
+        ray = ray_vector_ned(event, sta)
+        if ray is None:
+            continue
+        observations.append((sign, ray))
+
+    if len(observations) < args.min_polarities:
+        return {
+            "mechanism_n_polarities": len(observations),
+            "mechanism_misfit_fraction": "",
+            "mechanism_quality": "insufficient",
+            "mechanism_method": "first-motion-grid",
+        }
+
+    best: dict[str, Any] | None = None
+    strike_step = max(1, args.strike_step)
+    dip_step = max(1, args.dip_step)
+    rake_step = max(1, args.rake_step)
+    for strike in range(0, 360, strike_step):
+        for dip in range(dip_step, 91, dip_step):
+            for rake in range(-180, 181, rake_step):
+                moment = moment_tensor_ned(strike, dip, rake)
+                mismatches = sum(1 for observed, ray in observations if p_radiation_sign(moment, ray) != observed)
+                misfit = mismatches / len(observations)
+                if best is None or misfit < best["misfit"]:
+                    best = {"strike": strike, "dip": dip, "rake": rake, "misfit": misfit}
+                    if mismatches == 0:
+                        break
+            if best and best["misfit"] == 0.0:
+                break
+        if best and best["misfit"] == 0.0:
+            break
+
+    assert best is not None
+    aux_strike, aux_dip, aux_rake = auxiliary_plane_safe(best["strike"], best["dip"], best["rake"])
+    return {
+        "mechanism_strike": f"{best['strike']:.1f}",
+        "mechanism_dip": f"{best['dip']:.1f}",
+        "mechanism_rake": f"{best['rake']:.1f}",
+        "mechanism_aux_strike": aux_strike,
+        "mechanism_aux_dip": aux_dip,
+        "mechanism_aux_rake": aux_rake,
+        "mechanism_n_polarities": len(observations),
+        "mechanism_misfit_fraction": f"{best['misfit']:.3f}",
+        "mechanism_quality": mechanism_quality(len(observations), best["misfit"], args.min_polarities),
+        "mechanism_method": "first-motion-grid",
+    }
+
+
+def union_fieldnames(rows: Sequence[dict[str, Any]], preferred: Sequence[str] = ()) -> list[str]:
+    fields = list(preferred)
+    for row in rows:
+        for key in row:
+            if key not in fields:
+                fields.append(key)
+    return fields
+
+
+def cmd_mechanism(args: argparse.Namespace) -> int:
+    events = [dict(row) for row in read_csv_rows(args.events)]
+    picks = read_csv_rows(args.picks)
+    stations = read_stations(args.stations)
+    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in picks:
+        event_id = row.get("event_id", "")
+        if event_id:
+            grouped[event_id].append(row)
+
+    mechanism_rows: list[dict[str, Any]] = []
+    for event in events:
+        event_id = event.get("event_id", "")
+        row = {"event_id": event_id}
+        if args.method == "first-motion-grid":
+            row.update(solve_first_motion_grid(event, grouped.get(event_id, []), stations, args))
+        elif args.method == "hash-export":
+            row.update(
+                {
+                    "mechanism_n_polarities": sum(
+                        1
+                        for pick in grouped.get(event_id, [])
+                        if phase_group(pick.get("phase", "")) == "P" and polarity_sign(pick.get("polarity", "")) is not None
+                    ),
+                    "mechanism_quality": "hash-exported",
+                    "mechanism_method": "hash-export",
+                }
+            )
+        else:
+            raise CatalogError(f"Unsupported mechanism method: {args.method}")
+        mechanism_rows.append(row)
+
+    write_csv_rows(args.output, mechanism_rows, MECHANISM_FIELDS)
+    if args.hash_input:
+        hash_rows = []
+        for event in events:
+            event_id = event.get("event_id", "")
+            for pick in grouped.get(event_id, []):
+                if phase_group(pick.get("phase", "")) == "P" and polarity_sign(pick.get("polarity", "")) is not None:
+                    sta = station_for_pick(pick, stations)
+                    if sta:
+                        hash_rows.append(
+                            {
+                                "event_id": event_id,
+                                "origin_time": event.get("origin_time", ""),
+                                "latitude": event.get("latitude", ""),
+                                "longitude": event.get("longitude", ""),
+                                "depth_km": event.get("depth_km", ""),
+                                "network": sta.network,
+                                "station": sta.station,
+                                "location": sta.location,
+                                "longitude_station": sta.longitude,
+                                "latitude_station": sta.latitude,
+                                "elevation_m": sta.elevation_m,
+                                "polarity": pick.get("polarity", ""),
+                                "onset_quality": pick.get("polarity_quality", ""),
+                                "pick_time": pick.get("time", ""),
+                            }
+                        )
+        write_csv_rows(args.hash_input, hash_rows)
+    if args.catalog_output:
+        by_event = {row["event_id"]: row for row in mechanism_rows if row.get("event_id")}
+        final_rows = []
+        for event in events:
+            merged = dict(event)
+            mechanism = by_event.get(event.get("event_id", ""), {})
+            for key, value in mechanism.items():
+                if key != "event_id":
+                    merged[key] = value
+            final_rows.append(merged)
+        preferred = EVENT_FIELDS + [field for field in MECHANISM_FIELDS if field != "event_id"]
+        write_csv_rows(args.catalog_output, final_rows, union_fieldnames(final_rows, preferred))
+    eprint(f"mechanism_events={len(mechanism_rows)}")
     return 0
 
 
@@ -1541,6 +1812,171 @@ def cmd_plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_catalog(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    script = str(Path(__file__).resolve())
+    base = [sys.executable, script]
+
+    waveforms_csv = output_dir / "waveforms.csv"
+    waveform_errors = output_dir / "waveform_errors.csv"
+    picks_csv = output_dir / "picks.csv"
+    pick_errors = output_dir / "pick_errors.csv"
+    events_associated = output_dir / "events_associated.csv"
+    assignments_csv = output_dir / "assignments.csv"
+    picks_associated = output_dir / "picks_associated.csv"
+    picks_polarity = output_dir / "picks_with_polarity.csv"
+    events_located = output_dir / "events_located.csv"
+    events_ml = output_dir / "events_ml.csv"
+    station_ml = output_dir / "station_ml.csv"
+    mechanisms_csv = output_dir / "mechanisms.csv"
+    hash_input = output_dir / "hash_input.csv"
+    final_catalog = output_dir / args.catalog_name
+    activity_json = output_dir / "activity.json"
+    daily_counts = output_dir / "daily_counts.csv"
+    map_png = output_dir / "catalog_map.png"
+
+    run_logged(base + ["scan", "-w", args.waveforms, "-o", str(waveforms_csv), "--errors", str(waveform_errors), "--extensions", args.extensions])
+
+    pick_cmd = [
+        "pick",
+        "-w",
+        args.waveforms,
+        "-o",
+        str(picks_csv),
+        "--errors",
+        str(pick_errors),
+        "--extensions",
+        args.extensions,
+        "--picker",
+        args.picker,
+        "--phases",
+        args.phases,
+        "--model",
+        args.model,
+        "--device",
+        args.device,
+    ]
+    run_logged(base + pick_cmd)
+
+    associate_cmd = [
+        "associate",
+        "--method",
+        args.association_method,
+        "-p",
+        str(picks_csv),
+        "-s",
+        args.stations,
+        "-o",
+        str(events_associated),
+        "--assignments",
+        str(assignments_csv),
+        "--associated-picks",
+        str(picks_associated),
+        "--min-picks-per-eq",
+        str(args.min_picks_per_eq),
+        "--min-p-picks-per-eq",
+        str(args.min_p_picks_per_eq),
+        "--min-s-picks-per-eq",
+        str(args.min_s_picks_per_eq),
+    ]
+    run_logged(base + associate_cmd)
+
+    run_logged(base + ["polarity", "-p", str(picks_associated), "-o", str(picks_polarity), "--min-score", str(args.polarity_min_score)])
+
+    locate_cmd = [
+        "locate",
+        "-p",
+        str(picks_polarity),
+        "-s",
+        args.stations,
+        "-v",
+        args.velocity_model,
+        "-o",
+        str(events_located),
+        "--method",
+        args.location_method,
+        "--min-picks",
+        str(args.location_min_picks),
+    ]
+    if args.bayes_repo:
+        locate_cmd.extend(["--bayes-repo", args.bayes_repo])
+    if args.bayes_command:
+        locate_cmd.extend(["--bayes-command", args.bayes_command])
+    run_logged(base + locate_cmd)
+
+    magnitude_cmd = [
+        "magnitude-ml",
+        "-e",
+        str(events_located),
+        "-p",
+        str(picks_polarity),
+        "-s",
+        args.stations,
+        "-o",
+        str(events_ml),
+        "--station-output",
+        str(station_ml),
+        "--raw-to-mm",
+        str(args.raw_to_mm),
+    ]
+    if args.inventory:
+        magnitude_cmd.extend(["--inventory", args.inventory])
+    run_logged(base + magnitude_cmd)
+
+    run_logged(
+        base
+        + [
+            "mechanism",
+            "-e",
+            str(events_ml),
+            "-p",
+            str(picks_polarity),
+            "-s",
+            args.stations,
+            "-o",
+            str(mechanisms_csv),
+            "--catalog-output",
+            str(final_catalog),
+            "--hash-input",
+            str(hash_input),
+            "--method",
+            args.mechanism_method,
+            "--min-polarities",
+            str(args.min_polarities),
+            "--strike-step",
+            str(args.mechanism_grid_step),
+            "--dip-step",
+            str(args.mechanism_grid_step),
+            "--rake-step",
+            str(args.mechanism_grid_step),
+        ]
+    )
+
+    run_logged(base + ["analyze", "-e", str(final_catalog), "-o", str(activity_json), "--rate-output", str(daily_counts)])
+    if not args.skip_map:
+        try:
+            run_logged(base + ["plot-map", "-e", str(final_catalog), "-s", args.stations, "-o", str(map_png)])
+        except subprocess.CalledProcessError as exc:
+            eprint(f"map generation failed but catalog is complete: {exc}")
+
+    summary = {
+        "waveforms": str(waveforms_csv),
+        "picks": str(picks_csv),
+        "associated_picks": str(picks_associated),
+        "polarity_picks": str(picks_polarity),
+        "located_events": str(events_located),
+        "magnitude_events": str(events_ml),
+        "mechanisms": str(mechanisms_csv),
+        "final_catalog": str(final_catalog),
+        "activity": str(activity_json),
+        "map": str(map_png) if map_png.exists() else None,
+    }
+    (output_dir / "run_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    print(final_catalog)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SeismicX automated earthquake catalog helper CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1595,6 +2031,7 @@ def build_parser() -> argparse.ArgumentParser:
     associate.add_argument("-s", "--stations", required=True)
     associate.add_argument("-o", "--output", required=True)
     associate.add_argument("--assignments")
+    associate.add_argument("--associated-picks", help="Write picks with event_id populated after association")
     associate.add_argument("--method", choices=["gamma", "real", "simple"], default="gamma")
     associate.add_argument("--workdir", default="real_work")
     associate.add_argument("--real-command")
@@ -1667,6 +2104,20 @@ def build_parser() -> argparse.ArgumentParser:
     magnitude.add_argument("--c", type=float, default=-2.09)
     magnitude.set_defaults(func=cmd_magnitude)
 
+    mechanism = sub.add_parser("mechanism", help="Compute or export first-motion focal mechanisms")
+    mechanism.add_argument("-e", "--events", required=True)
+    mechanism.add_argument("-p", "--picks", required=True)
+    mechanism.add_argument("-s", "--stations", required=True)
+    mechanism.add_argument("-o", "--output", required=True)
+    mechanism.add_argument("--catalog-output", help="Write events merged with mechanism columns")
+    mechanism.add_argument("--hash-input", help="Write a HASH-friendly polarity input CSV")
+    mechanism.add_argument("--method", choices=["first-motion-grid", "hash-export"], default="first-motion-grid")
+    mechanism.add_argument("--min-polarities", type=int, default=6)
+    mechanism.add_argument("--strike-step", type=int, default=10)
+    mechanism.add_argument("--dip-step", type=int, default=10)
+    mechanism.add_argument("--rake-step", type=int, default=10)
+    mechanism.set_defaults(func=cmd_mechanism)
+
     analyze = sub.add_parser("analyze", help="Summarize catalog activity")
     analyze.add_argument("-e", "--events", required=True)
     analyze.add_argument("-o", "--output", required=True)
@@ -1683,6 +2134,34 @@ def build_parser() -> argparse.ArgumentParser:
     plot.add_argument("--height", type=float, default=6.0)
     plot.add_argument("--dpi", type=int, default=180)
     plot.set_defaults(func=cmd_plot)
+
+    catalog = sub.add_parser("catalog", help="Run the end-to-end earthquake catalog workflow")
+    catalog.add_argument("-w", "--waveforms", required=True)
+    catalog.add_argument("-s", "--stations", required=True)
+    catalog.add_argument("-v", "--velocity-model", required=True)
+    catalog.add_argument("-o", "--output-dir", required=True)
+    catalog.add_argument("--catalog-name", default="catalog_final.csv")
+    catalog.add_argument("--extensions", default="common")
+    catalog.add_argument("--picker", choices=["torchscript-pnsn", "classic"], default="torchscript-pnsn")
+    catalog.add_argument("--phases", default="Pg,Sg,Pn,Sn")
+    catalog.add_argument("--model", default="pnsn-v3")
+    catalog.add_argument("--device", default="cpu")
+    catalog.add_argument("--association-method", choices=["simple", "gamma"], default="simple")
+    catalog.add_argument("--min-picks-per-eq", type=int, default=5)
+    catalog.add_argument("--min-p-picks-per-eq", type=int, default=3)
+    catalog.add_argument("--min-s-picks-per-eq", type=int, default=0)
+    catalog.add_argument("--location-method", choices=["grid", "bayes"], default="grid")
+    catalog.add_argument("--location-min-picks", type=int, default=4)
+    catalog.add_argument("--bayes-repo")
+    catalog.add_argument("--bayes-command")
+    catalog.add_argument("--inventory")
+    catalog.add_argument("--raw-to-mm", type=float, default=1.0)
+    catalog.add_argument("--polarity-min-score", type=float, default=2.0)
+    catalog.add_argument("--mechanism-method", choices=["first-motion-grid", "hash-export"], default="first-motion-grid")
+    catalog.add_argument("--min-polarities", type=int, default=6)
+    catalog.add_argument("--mechanism-grid-step", type=int, default=10)
+    catalog.add_argument("--skip-map", action="store_true")
+    catalog.set_defaults(func=cmd_catalog)
 
     return parser
 

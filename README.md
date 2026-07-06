@@ -33,13 +33,30 @@ Large waveform examples, large model weights, compiled binaries, and external re
 
 ## Quick Start
 
+One-command baseline run:
+
+```bash
+python scripts/seismicx_catalog.py catalog \
+  -w <waveforms> \
+  -s stations.csv \
+  -v velocity_model.csv \
+  -o work/catalog_run
+```
+
+The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes location, ML, and focal-mechanism columns when enough data are available. Add `--association-method gamma` when GaMMA is installed and configured for production association.
+
+Step-by-step run:
+
 ```bash
 python scripts/seismicx_catalog.py init-config -o work/seismicx_catalog.yaml
 python scripts/seismicx_catalog.py list-models
 python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv
 python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn
-python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv
-python scripts/seismicx_catalog.py locate -p work/picks_associated.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
+python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv
+python scripts/seismicx_catalog.py polarity -p work/picks_associated.csv -o work/picks_with_polarity.csv
+python scripts/seismicx_catalog.py locate -p work/picks_with_polarity.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
+python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv -o work/events_ml.csv --station-output work/station_ml.csv
+python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv
 ```
 
 Optional local tool builds:

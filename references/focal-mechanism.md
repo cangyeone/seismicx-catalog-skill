@@ -23,6 +23,22 @@ The skill bundles the in-house TorchScript polarity model at `assets/models/pola
 
 Before HASH, verify channel orientation, instrument polarity, station reversals, and whether positive vertical counts correspond to upward ground motion for the local network. Automatic first motion should be reviewed for events used in publications.
 
+## Built-In Baseline Mechanism
+
+Use the built-in first-motion grid search to complete a transparent baseline catalog or to QC polarity coverage before HASH:
+
+```bash
+python scripts/seismicx_catalog.py mechanism \
+  -e work/events_ml.csv \
+  -p work/picks_with_polarity.csv \
+  -s stations.csv \
+  -o work/mechanisms.csv \
+  --catalog-output work/catalog_final.csv \
+  --hash-input work/hash_input.csv
+```
+
+This baseline searches strike, dip, and rake against P first-motion signs using a straight-ray geometry. Treat it as a quick-look mechanism, not as a substitute for HASH when publishing focal mechanisms.
+
 ## When To Run HASH
 
 Run HASH only when an event has:

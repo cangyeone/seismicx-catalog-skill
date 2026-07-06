@@ -14,23 +14,29 @@ The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable wav
 ## Workflow
 
 1. Confirm inputs: waveform directory, station metadata, response or StationXML if ML is required, velocity model, desired phases, and preferred association/location engines.
-2. Scan waveforms first:
+2. For a one-shot baseline catalog, run the end-to-end wrapper. Use `--association-method gamma` when GaMMA is installed; use the default `simple` method only for smoke tests or tiny examples:
+   `python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
+3. For controlled production work, scan waveforms first:
    `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`
-3. Inspect bundled models when needed:
+4. Inspect bundled models when needed:
    `python scripts/seismicx_catalog.py list-models`
-4. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Use `classic` only as a no-model smoke-test fallback:
+5. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Use `classic` only as a no-model smoke-test fallback:
    `python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
-5. If REAL, HASH, or pnsn are needed locally, build or clone them before the dependent step:
+6. If REAL, HASH, or pnsn are needed locally, build or clone them before the dependent step:
    `python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json`
-6. Associate picks with the user's selected engine:
-   `python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv`
-7. Locate associated events. Always require a velocity model for production work. Use the grid solver for a baseline, or export/run `cangyeone/bayes_location` through `--method bayes` when the user requests it.
-8. Calculate ML only after confirming amplitude units and response metadata:
-   `python scripts/seismicx_catalog.py magnitude-ml -e work/located_events.csv -p work/picks.csv -s stations.csv --inventory stations.xml -o work/events_ml.csv --station-output work/station_ml.csv`
-9. Analyze and plot:
-   `python scripts/seismicx_catalog.py analyze -e work/events_ml.csv -o work/activity.json --rate-output work/daily_counts.csv`
-   `python scripts/seismicx_catalog.py plot-map -e work/events_ml.csv -s stations.csv -o work/catalog_map.png`
-10. For focal mechanisms, compute or QC P first motions, then run HASH/pyhash only for events with enough azimuthal coverage and reliable polarities.
+7. Associate picks with the user's selected engine and always write associated picks with `event_id`:
+   `python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv`
+8. Recompute or QC first motion on associated picks:
+   `python scripts/seismicx_catalog.py polarity -p work/picks_associated.csv -o work/picks_with_polarity.csv`
+9. Locate associated events. Always require a velocity model for production work. Use the grid solver for a baseline, or export/run `cangyeone/bayes_location` through `--method bayes` when the user requests it:
+   `python scripts/seismicx_catalog.py locate --method grid -p work/picks_with_polarity.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv`
+10. Calculate ML only after confirming amplitude units and response metadata:
+   `python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml -o work/events_ml.csv --station-output work/station_ml.csv`
+11. Compute a first-motion focal-mechanism baseline or export HASH input, then produce the final merged catalog:
+   `python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv`
+12. Analyze and plot:
+   `python scripts/seismicx_catalog.py analyze -e work/catalog_final.csv -o work/activity.json --rate-output work/daily_counts.csv`
+   `python scripts/seismicx_catalog.py plot-map -e work/catalog_final.csv -s stations.csv -o work/catalog_map.png`
 
 ## Reference Routing
 
