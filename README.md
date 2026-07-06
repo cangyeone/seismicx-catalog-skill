@@ -9,7 +9,7 @@ Agent-friendly workflows and helper tools for automated earthquake cataloging fr
 This repository packages a publishable Codex skill for end-to-end earthquake automatic catalog work:
 
 - Analyze waveform directory structure and scan MSEED, SAC, SEED, and other ObsPy-readable formats.
-- Pick user-selected phases such as P/S, Pg/Sg, or Pn/Sn with a clean classic fallback or SeisBench model wrappers.
+- Pick user-selected phases such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
 - Associate picks with GaMMA or REAL, with local build support for REAL.
 - Locate events with an explicit velocity model, including a hook for `cangyeone/bayes_location`.
 - Calculate local magnitude ML with station-level outputs.
@@ -29,14 +29,15 @@ README.md
 LICENSE
 ```
 
-Large waveform examples, trained model weights, compiled binaries, and external repositories are intentionally not published in the skill package.
+Large waveform examples, large model weights, compiled binaries, and external repositories are intentionally not published in the skill package. The repository does include compact in-house bundled models under `assets/models/`: `pnsn.v3.jit` for Pg/Sg/Pn/Sn picking and `polar.jit` for first-motion polarity workflows.
 
 ## Quick Start
 
 ```bash
 python scripts/seismicx_catalog.py init-config -o work/seismicx_catalog.yaml
+python scripts/seismicx_catalog.py list-models
 python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv
-python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --phases Pg,Sg
+python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn
 python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv
 python scripts/seismicx_catalog.py locate -p work/picks_associated.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
 ```

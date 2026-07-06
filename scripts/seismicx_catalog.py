@@ -5,7 +5,8 @@ This script is intentionally lightweight: it provides clean data contracts,
 format conversion, quality-control helpers, and wrappers around established
 seismological packages. Heavy models and external engines such as REAL,
 GaMMA, HASH, and bayes_location stay outside the skill and are referenced by
-path or command template at runtime.
+path or command template at runtime. Small in-house TorchScript models live
+under assets/models and are described by assets/models/model_registry.json.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Sequence
 
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+MODEL_REGISTRY_PATH = SKILL_ROOT / "assets" / "models" / "model_registry.json"
 
 COMMON_WAVEFORM_EXTENSIONS = {
     ".mseed",
@@ -87,6 +91,15 @@ STATION_FIELDS = [
     "elevation_m",
 ]
 
+PNSN_PHASE_MAP = {
+    0: "Pg",
+    1: "Sg",
+    2: "Pn",
+    3: "Sn",
+    4: "P",
+    5: "S",
+}
+
 
 class CatalogError(RuntimeError):
     """Raised for user-fixable catalog workflow errors."""
@@ -121,6 +134,29 @@ def ensure_parent(path: str | Path) -> None:
 def read_csv_rows(path: str | Path) -> list[dict[str, str]]:
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def read_model_registry() -> dict[str, dict[str, Any]]:
+    if not MODEL_REGISTRY_PATH.exists():
+        return {}
+    with open(MODEL_REGISTRY_PATH, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return {model["id"]: model for model in payload.get("models", [])}
+
+
+def resolve_model_path(model: str | None, default_model_id: str = "pnsn-v3") -> tuple[Path, dict[str, Any] | None]:
+    registry = read_model_registry()
+    selected = model or default_model_id
+    if selected in registry:
+        metadata = registry[selected]
+        return MODEL_REGISTRY_PATH.parent / metadata["file"], metadata
+    candidate = Path(selected)
+    if candidate.exists():
+        return candidate, None
+    skill_relative = SKILL_ROOT / selected
+    if skill_relative.exists():
+        return skill_relative, None
+    raise CatalogError(f"Model not found: {selected}. Run `python scripts/seismicx_catalog.py list-models` to see bundled models.")
 
 
 def write_csv_rows(
@@ -431,10 +467,10 @@ def cmd_init_config(args: argparse.Namespace) -> int:
     output_dir: ./catalog_out
 
     picking:
-      picker: classic
-      phases: [P, S]
+      picker: torchscript-pnsn
+      phases: [Pg, Sg, Pn, Sn]
       device: cpu
-      model: null
+      model: pnsn-v3
 
     association:
       method: gamma
@@ -573,55 +609,194 @@ def classic_pick_file(path: Path, requested: set[str], args: argparse.Namespace)
     return picks
 
 
-def seisbench_pick_file(path: Path, requested: set[str], args: argparse.Namespace) -> list[dict[str, Any]]:
-    try:
-        import seisbench.models as sbm
-    except ImportError as exc:
-        raise CatalogError("SeisBench picker requested but seisbench is not installed. Install with: pip install seisbench") from exc
+def component_family(channel: str) -> str | None:
+    component = (channel or "")[-1:].upper()
+    if component in {"E", "1"}:
+        return "E"
+    if component in {"N", "2"}:
+        return "N"
+    if component == "Z":
+        return "Z"
+    return None
 
-    model_class_name = args.model or ("EQTransformer" if args.picker == "seisbench-eqtransformer" else "PhaseNet")
-    if not hasattr(sbm, model_class_name):
-        raise CatalogError(f"SeisBench model class not found: {model_class_name}")
-    model_class = getattr(sbm, model_class_name)
-    pretrained = args.weights or "original"
-    model = model_class.from_pretrained(pretrained)
-    if args.device:
-        model.to(args.device)
-    stream = read_waveform(path)
-    output = model.classify(stream)
-    raw_picks = getattr(output, "picks", output)
-    rows: list[dict[str, Any]] = []
-    for idx, pick in enumerate(raw_picks, start=1):
-        phase = getattr(pick, "phase", None) or getattr(pick, "phase_hint", "")
-        label = choose_phase_label(str(phase), requested)
-        if label is None:
+
+def station_day_key(trace: Any) -> tuple[str, str, str, str]:
+    stats = trace.stats
+    start = getattr(stats, "starttime", None)
+    day = f"{start.year:04d}.{start.julday:03d}" if start else "unknown"
+    return getattr(stats, "network", ""), getattr(stats, "station", ""), getattr(stats, "location", ""), day
+
+
+def matches_station_day(trace: Any, key: tuple[str, str, str, str]) -> bool:
+    return station_day_key(trace) == key and component_family(getattr(trace.stats, "channel", "")) is not None
+
+
+def select_three_components(stream: Any) -> list[tuple[str, Any]]:
+    selected: dict[str, Any] = {}
+    for trace in stream:
+        family = component_family(getattr(trace.stats, "channel", ""))
+        if family and family not in selected:
+            selected[family] = trace
+    if not all(key in selected for key in ("E", "N", "Z")):
+        return []
+    return [("E", selected["E"]), ("N", selected["N"]), ("Z", selected["Z"])]
+
+
+def torchscript_pnsn_pick_files(paths: Sequence[Path], requested: set[str], args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    import numpy as np
+    import torch
+    from obspy import Stream
+
+    model_path, metadata = resolve_model_path(args.model, "pnsn-v3")
+    if not model_path.exists():
+        raise CatalogError(f"Bundled model file is missing: {model_path}")
+
+    device = torch.device(args.device or "cpu")
+    session = torch.jit.load(str(model_path), map_location=device)
+    session.eval()
+    session.to(device)
+
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    errors: list[dict[str, str]] = []
+    for path in paths:
+        try:
+            stream = read_waveform(path, headonly=True)
+        except Exception as exc:
+            errors.append({"path": str(path), "error": str(exc)})
             continue
-        trace_id = getattr(pick, "trace_id", "") or getattr(pick, "id", "")
-        parts = infer_trace_parts(trace_id)
-        peak_time = getattr(pick, "peak_time", None) or getattr(pick, "time", "")
-        score = getattr(pick, "peak_value", None) or getattr(pick, "score", "")
+        for trace in stream:
+            family = component_family(getattr(trace.stats, "channel", ""))
+            if family is None:
+                continue
+            key = station_day_key(trace)
+            entry = grouped.setdefault(key, {"paths": set(), "families": set()})
+            entry["paths"].add(str(path))
+            entry["families"].add(family)
+
+    all_picks: list[dict[str, Any]] = []
+    samplerate = float(metadata.get("sampling_rate_hz", 100) if metadata else 100)
+    requested_groups = {phase_group(item) for item in requested}
+    for key, entry in grouped.items():
+        network, station, location, _ = key
+        try:
+            if not all(family in entry["families"] for family in ("E", "N", "Z")):
+                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "missing E/N/Z components"})
+                continue
+            stream = Stream()
+            for source in sorted(entry["paths"]):
+                try:
+                    source_stream = read_waveform(source)
+                except Exception as exc:
+                    errors.append({"path": source, "error": str(exc)})
+                    continue
+                for trace in source_stream:
+                    if matches_station_day(trace, key):
+                        stream.append(trace)
+            if not stream:
+                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "no readable matching traces"})
+                continue
+            stream.merge(fill_value=0)
+            stream.resample(samplerate)
+            components = select_three_components(stream)
+            if not components:
+                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "missing E/N/Z components"})
+                continue
+            start = min(trace.stats.starttime for _, trace in components)
+            end = max(trace.stats.endtime for _, trace in components)
+            arrays = []
+            component_traces = {}
+            for family, trace in components:
+                tr = trace.copy()
+                tr.trim(starttime=start, endtime=end, pad=True, nearest_sample=True, fill_value=0)
+                tr.detrend("demean")
+                arrays.append(np.asarray(tr.data, dtype=np.float32))
+                component_traces[family] = tr
+            npts = min(len(array) for array in arrays)
+            if npts == 0:
+                continue
+            data = np.stack([array[:npts] for array in arrays], axis=1).astype(np.float32)
+            with torch.no_grad():
+                output = session(torch.tensor(data, dtype=torch.float32, device=device)).detach().cpu().numpy()
+            if output.size == 0:
+                continue
+            if output.ndim == 1:
+                output = output.reshape(1, -1)
+            waveform_path = ";".join(sorted(entry["paths"])[:3])
+            z_trace = component_traces["Z"]
+            z_data = np.asarray(z_trace.data[:npts], dtype=float)
+            for row in output:
+                if len(row) < 3:
+                    continue
+                phase_index = int(row[0])
+                phase = PNSN_PHASE_MAP.get(phase_index, str(phase_index))
+                if phase.upper() in requested:
+                    label = phase
+                elif phase_group(phase) in requested_groups:
+                    label = choose_phase_label(phase, requested)
+                else:
+                    label = None
+                if label is None:
+                    continue
+                sample_index = int(round(float(row[1])))
+                if sample_index < 0 or sample_index >= npts:
+                    continue
+                pick_time = start + sample_index / samplerate
+                snr = estimate_pick_snr(z_data, sample_index, samplerate, args.noise_window, args.signal_window)
+                amp_stop = min(len(z_data), sample_index + int(args.signal_window * samplerate))
+                amplitude = float(np.nanmax(np.abs(z_data[sample_index:amp_stop]))) if amp_stop > sample_index else float("nan")
+                polarity, polarity_quality, polarity_score = ("N", "", 0.0)
+                if phase_group(label) == "P":
+                    polarity, polarity_quality, polarity_score = estimate_first_motion(z_trace, pick_time, min_score=args.polarity_min_score)
+                all_picks.append(
+                    {
+                        "pick_id": f"p{len(all_picks) + 1:08d}",
+                        "event_id": "",
+                        "waveform_path": waveform_path,
+                        "trace_id": station_id(network, station, location) + ".3C",
+                        "network": network,
+                        "station": station,
+                        "location": location,
+                        "channel": "3C",
+                        "phase": label,
+                        "time": datetime_to_text(pick_time.datetime),
+                        "score": f"{float(row[2]):.6g}",
+                        "snr": f"{snr:.6g}" if math.isfinite(snr) else "",
+                        "amplitude": f"{amplitude:.6g}" if math.isfinite(amplitude) else "",
+                        "polarity": polarity,
+                        "polarity_quality": polarity_quality,
+                        "polarity_score": f"{polarity_score:.6g}",
+                        "picker": f"torchscript-pnsn:{model_path.name}",
+                    }
+                )
+        except Exception as exc:
+            errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": str(exc)})
+    return all_picks, errors
+
+
+def cmd_list_models(args: argparse.Namespace) -> int:
+    registry = read_model_registry()
+    rows = []
+    for model_id, metadata in sorted(registry.items()):
+        path = MODEL_REGISTRY_PATH.parent / metadata["file"]
         rows.append(
             {
-                "pick_id": str(idx),
-                "event_id": "",
-                "waveform_path": str(path),
-                "trace_id": trace_id,
-                "network": parts["network"],
-                "station": parts["station"],
-                "location": parts["location"],
-                "channel": parts["channel"],
-                "phase": label,
-                "time": datetime_to_text(getattr(peak_time, "datetime", peak_time)),
-                "score": score,
-                "snr": "",
-                "amplitude": "",
-                "polarity": "",
-                "polarity_quality": "",
-                "polarity_score": "",
-                "picker": f"seisbench-{model_class_name}:{pretrained}",
+                "id": model_id,
+                "task": metadata.get("task", ""),
+                "type": metadata.get("type", ""),
+                "file": str(path),
+                "size_mb": f"{path.stat().st_size / 1024 / 1024:.2f}" if path.exists() else "missing",
+                "phases": ",".join(metadata.get("phases", [])),
+                "recommended": metadata.get("recommended", False),
             }
         )
-    return rows
+    if args.json:
+        print(json.dumps({"models": rows}, indent=2))
+    else:
+        if rows:
+            writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+    return 0
 
 
 def cmd_pick(args: argparse.Namespace) -> int:
@@ -631,12 +806,18 @@ def cmd_pick(args: argparse.Namespace) -> int:
     all_picks: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     files = list(iter_waveform_files(args.waveforms, args.extensions))
+    if args.picker == "torchscript-pnsn":
+        all_picks, errors = torchscript_pnsn_pick_files(files, requested, args)
+        write_csv_rows(args.output, all_picks, PICK_FIELDS)
+        if args.errors:
+            write_csv_rows(args.errors, errors, ["path", "error"])
+        eprint(f"picks={len(all_picks)} rejected_groups={len(errors)}")
+        return 0
+
     for file_index, path in enumerate(files, start=1):
         try:
             if args.picker == "classic":
                 picks = classic_pick_file(path, requested, args)
-            elif args.picker in {"seisbench-phasenet", "seisbench-eqtransformer"}:
-                picks = seisbench_pick_file(path, requested, args)
             else:
                 raise CatalogError(f"Unsupported picker: {args.picker}")
             for pick in picks:
@@ -1375,15 +1556,18 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--extensions", default="common", help="'common', 'all', or comma-separated extensions")
     scan.set_defaults(func=cmd_scan)
 
+    list_models = sub.add_parser("list-models", help="List bundled SeismicX models")
+    list_models.add_argument("--json", action="store_true")
+    list_models.set_defaults(func=cmd_list_models)
+
     pick = sub.add_parser("pick", help="Pick phases from waveform files")
     pick.add_argument("-w", "--waveforms", required=True)
     pick.add_argument("-o", "--output", required=True)
     pick.add_argument("--errors")
     pick.add_argument("--extensions", default="common")
-    pick.add_argument("--picker", choices=["classic", "seisbench-phasenet", "seisbench-eqtransformer"], default="classic")
-    pick.add_argument("--phases", default="P,S")
-    pick.add_argument("--model")
-    pick.add_argument("--weights")
+    pick.add_argument("--picker", choices=["torchscript-pnsn", "classic"], default="torchscript-pnsn")
+    pick.add_argument("--phases", default="Pg,Sg,Pn,Sn")
+    pick.add_argument("--model", default="pnsn-v3", help="Bundled model id from list-models or a TorchScript path")
     pick.add_argument("--device", default="cpu")
     pick.add_argument("--sta", type=float, default=0.5)
     pick.add_argument("--lta", type=float, default=5.0)

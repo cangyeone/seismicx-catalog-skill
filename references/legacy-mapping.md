@@ -13,12 +13,12 @@ The old pipeline was script-numbered and path-specific:
 | `3.makeavailableresppath.py` | Replace with explicit StationXML/RESP metadata paths. |
 | `4.mergemseed.py` | Use ObsPy `Stream.merge` inside preprocessing or user-provided merge scripts. |
 | `5.resp2xml.py`, `6.xml2dataless.py` | Replace with StationXML-first metadata handling where possible. |
-| `7.pick.py` | Replaced by `pick`; keep old model names only as user-supplied external weights. |
+| `7.pick.py` | Replaced by `pick`; bundled defaults are `assets/models/pnsn.v3.jit` and `assets/models/polar.jit`; keep larger or experimental model names as user-supplied external weights. |
 | `8.makejson.py`, `9.json2pha.py` | Replace with canonical CSV picks/events and explicit converters only when needed. |
 | `10.mseed2seed.py` | Treat as legacy export, not part of the default catalog skill. |
 | `utils/calmag.py` | ML concepts migrated into `magnitude-ml`; regional constants must still be reviewed. |
 
-Do not publish bundled `.jit`, `.onnx`, `.pt`, waveform examples, jar files, generated `odata`, or compiled binaries from the legacy tree unless the user explicitly requests a separate data/model release.
+Do not publish additional `.jit`, `.onnx`, `.pt`, waveform examples, jar files, generated `odata`, or compiled binaries from the legacy tree unless the user explicitly requests a separate data/model release.
 
 ## pyhash
 
@@ -68,6 +68,6 @@ The publishable skill should contain:
 - `agents/openai.yaml`
 - `scripts/seismicx_catalog.py`
 - `references/*.md`
-- small templates and the logo asset
+- small templates, the logo asset, and compact in-house models in `assets/models/`
 
 Everything else belongs in local working directories, external cloned repositories, or user-managed model/data storage.

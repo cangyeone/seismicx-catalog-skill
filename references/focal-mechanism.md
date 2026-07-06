@@ -19,6 +19,8 @@ Interpretation rules:
 - `N` means not reliable enough to use.
 - `I` is impulsive, `E` is emergent.
 
+The skill bundles the in-house TorchScript polarity model at `assets/models/polar.jit` and records it in `assets/models/model_registry.json`. Use it when building a project-specific polarity adapter that matches the original PNSN convention: 100 Hz Z-component waveform, 1024-sample window centered around Pg, and output classes `U` and `D`. The default CLI keeps a deterministic slope/SNR method so polarity behavior stays transparent when the polar adapter has not been validated on the user's platform.
+
 Before HASH, verify channel orientation, instrument polarity, station reversals, and whether positive vertical counts correspond to upward ground motion for the local network. Automatic first motion should be reviewed for events used in publications.
 
 ## When To Run HASH

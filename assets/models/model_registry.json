@@ -1,0 +1,32 @@
+{
+  "models": [
+    {
+      "id": "pnsn-v3",
+      "file": "pnsn.v3.jit",
+      "type": "torchscript",
+      "task": "phase-picking",
+      "phases": ["Pg", "Sg", "Pn", "Sn"],
+      "sampling_rate_hz": 100,
+      "channels": ["E", "N", "Z"],
+      "max_distance_km": 2000,
+      "recommended": true,
+      "source": "cangyeone/pnsn pickers/pnsn.v3.jit",
+      "sha256": "900dbf785d39b16fcaab5f53d04adddf6796b47f7aec17929abc6e7cfa5b2ddb",
+      "notes": "Paper/deployment PNSN model. TorchScript output rows are [phase_type, relative_sample, confidence] with 0=Pg, 1=Sg, 2=Pn, 3=Sn."
+    },
+    {
+      "id": "polar-jit",
+      "file": "polar.jit",
+      "type": "torchscript",
+      "task": "first-motion-polarity",
+      "phases": ["Pg"],
+      "sampling_rate_hz": 100,
+      "channels": ["Z"],
+      "window_samples": 1024,
+      "recommended": true,
+      "source": "cangyeone/pnsn pickers/polar.jit",
+      "sha256": "82cd1eba1871aad4e40957968263ebbd8bbfa8c3d52220ea848b23f8135cdd10",
+      "notes": "Bundled because it is an in-house first-motion model. The CLI keeps the deterministic slope/SNR polarity fallback unless a project-specific polar adapter is added."
+    }
+  ]
+}

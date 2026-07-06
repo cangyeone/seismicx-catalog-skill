@@ -25,6 +25,9 @@ external/
 *.pt
 *.pth
 *.ckpt
+!assets/models/
+!assets/models/*.jit
+!assets/models/*.json
 odata/
 work/
 catalog_out/

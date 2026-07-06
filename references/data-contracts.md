@@ -46,7 +46,7 @@ Canonical pick CSV columns:
 
 ```csv
 pick_id,event_id,waveform_path,trace_id,network,station,location,channel,phase,time,score,snr,amplitude,polarity,polarity_quality,polarity_score,picker
-p00000001,,/data/day001/YN.C2714.40.EIZ.mseed,YN.C2714.40.EIZ,YN,C2714,40,EIZ,Pg,2023-05-03T04:08:29.140000Z,0.58,2.23,80.1,U,E,2.4,classic-sta-lta
+p00000001,,/data/day001/YN.C2714.40.EIZ.mseed,YN.C2714.40.3C,YN,C2714,40,3C,Pg,2023-05-03T04:08:29.140000Z,0.58,2.23,80.1,U,E,2.4,torchscript-pnsn:pnsn.v3.jit
 ```
 
 Rules:
