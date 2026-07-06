@@ -114,6 +114,12 @@ PNSN_PHASE_MAP = {
     5: "S",
 }
 
+DOWNLOADABLE_TOOL_REPOS = {
+    "pnsn": ("https://github.com/cangyeone/pnsn.git", "pnsn"),
+    "bayes-location": ("https://github.com/cangyeone/bayes_location.git", "bayes_location"),
+    "seismological-ai-tools": ("https://github.com/cangyeone/seismological-ai-tools.git", "seismological-ai-tools"),
+}
+
 
 class CatalogError(RuntimeError):
     """Raised for user-fixable catalog workflow errors."""
@@ -1145,14 +1151,14 @@ def clone_or_update(url: str, destination: Path) -> None:
     run_logged(["git", "clone", url, str(destination)])
 
 
-def clone_pnsn(destination: Path) -> None:
+def clone_without_ds_store(url: str, destination: Path) -> None:
     if (destination / ".git").exists():
         run_logged(["git", "-C", str(destination), "pull", "--ff-only"])
         return
     if destination.exists() and any(destination.iterdir()):
         raise CatalogError(f"Destination exists and is not an empty git repository: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    run_logged(["git", "clone", "--no-checkout", "https://github.com/cangyeone/pnsn.git", str(destination)])
+    run_logged(["git", "clone", "--no-checkout", url, str(destination)])
     run_logged(["git", "-C", str(destination), "sparse-checkout", "init", "--no-cone"])
     run_logged(["git", "-C", str(destination), "sparse-checkout", "set", "/*", "!**/.DS_Store"])
     run_logged(["git", "-C", str(destination), "checkout"])
@@ -1191,25 +1197,27 @@ def build_first_makefile(root: Path, jobs: int, preferred: Sequence[str] = ()) -
 
 
 def cmd_build_tools(args: argparse.Namespace) -> int:
-    tools = ["real", "hash", "pnsn"] if args.tool == "all" else [args.tool]
+    tools = ["pnsn", "real", "bayes-location", "seismological-ai-tools"] if args.tool == "all" else [args.tool]
     root = Path(args.tools_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {}
 
-    if "pnsn" in tools:
-        destination = root / "pnsn"
-        clone_pnsn(destination)
-        manifest["pnsn"] = {"path": str(destination), "status": "cloned"}
+    for tool_name in ("pnsn", "bayes-location", "seismological-ai-tools"):
+        if tool_name in tools:
+            repo_url, directory_name = DOWNLOADABLE_TOOL_REPOS[tool_name]
+            destination = root / directory_name
+            clone_without_ds_store(repo_url, destination)
+            manifest[tool_name] = {"path": str(destination), "url": repo_url, "status": "cloned"}
 
     if "real" in tools:
         destination = root / "REAL"
         clone_or_update("https://github.com/Dal-mzhang/REAL.git", destination)
         if args.skip_build:
-            manifest["real"] = {"path": str(destination), "status": "cloned"}
+            manifest["real"] = {"path": str(destination), "url": "https://github.com/Dal-mzhang/REAL.git", "status": "cloned"}
         else:
             built_dir = build_first_makefile(destination, args.jobs, preferred=("src",))
             executables = [str(path) for path in destination.rglob("REAL") if path.is_file()]
-            manifest["real"] = {"path": str(destination), "build_dir": str(built_dir), "executables": executables}
+            manifest["real"] = {"path": str(destination), "url": "https://github.com/Dal-mzhang/REAL.git", "build_dir": str(built_dir), "executables": executables}
 
     if "hash" in tools:
         source = Path(args.hash_source).resolve() if args.hash_source else Path("pyhash").resolve()
@@ -2060,8 +2068,8 @@ def build_parser() -> argparse.ArgumentParser:
     associate.add_argument("--time-gap", type=float, default=20.0)
     associate.set_defaults(func=cmd_associate)
 
-    build_tools = sub.add_parser("build-tools", help="Clone and locally build optional engines such as REAL and HASH")
-    build_tools.add_argument("--tool", choices=["real", "hash", "pnsn", "all"], default="all")
+    build_tools = sub.add_parser("build-tools", help="Download, clone, and locally build optional engines")
+    build_tools.add_argument("--tool", choices=["real", "hash", "pnsn", "bayes-location", "seismological-ai-tools", "all"], default="all")
     build_tools.add_argument("--tools-dir", default="external")
     build_tools.add_argument("--hash-source", help="Path to pyhash/HASH source; defaults to ./pyhash when present")
     build_tools.add_argument("--jobs", type=int, default=max(1, min(os.cpu_count() or 1, 8)))

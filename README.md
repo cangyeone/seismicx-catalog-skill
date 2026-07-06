@@ -2,11 +2,11 @@
 
 # SeismicX Catalog Skill
 
-Agent-friendly workflows and helper tools for automated earthquake cataloging from local seismic waveform archives.
+Agent-friendly workflows and helper tools for automated earthquake cataloging from local seismic waveform archives. The package is usable from Codex-style skills, OpenCode `AGENTS.md`, Claude Code `CLAUDE.md`, or any agent that can read Markdown instructions and run local scripts.
 
 ## What It Does
 
-This repository packages a publishable Codex skill for end-to-end earthquake automatic catalog work:
+This repository packages a publishable, agent-agnostic skill for end-to-end earthquake automatic catalog work:
 
 - Analyze waveform directory structure and scan MSEED, SAC, SEED, and other ObsPy-readable formats.
 - Pick user-selected phases such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
@@ -20,6 +20,8 @@ This repository packages a publishable Codex skill for end-to-end earthquake aut
 
 ```text
 SKILL.md
+AGENTS.md
+CLAUDE.md
 agents/openai.yaml
 scripts/seismicx_catalog.py
 references/
@@ -62,9 +64,14 @@ python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks
 Optional local tool builds:
 
 ```bash
-python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool pnsn --tools-dir external -o work/pnsn_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool bayes-location --tools-dir external -o work/bayes_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool seismological-ai-tools --tools-dir external -o work/ai_tools_manifest.json
+python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external --skip-build -o work/real_manifest.json
 python scripts/seismicx_catalog.py build-tools --tool hash --hash-source ./pyhash -o work/hash_build_manifest.json
 ```
+
+Use `--tool all --skip-build` to download the standard external reference repositories (`pnsn`, REAL, `bayes_location`, and `seismological-ai-tools`) into `external/`. HASH/pyhash is intentionally explicit because the source tree and Fortran build vary by deployment.
 
 ## Related Tools
 

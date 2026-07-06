@@ -60,6 +60,18 @@ Use `cangyeone/seismological-ai-tools` as an optional reference for AI seismic u
 
 Prefer linking or documenting compatible commands instead of copying large modules, model weights, training artifacts, or generated plots into the skill. Note that some referenced repositories or model assets carry non-commercial or redistribution restrictions; keep them as user-managed dependencies unless the license is explicitly compatible with publication.
 
+Download optional reference repositories into a local ignored directory when needed:
+
+```bash
+python scripts/seismicx_catalog.py build-tools \
+  --tool all \
+  --tools-dir external \
+  --skip-build \
+  -o work/tools_manifest.json
+```
+
+This downloads PNSN, REAL, `bayes_location`, and `seismological-ai-tools`. Build HASH/pyhash separately from a user-provided source tree.
+
 ## Publication Boundary
 
 The publishable skill should contain:

@@ -11,6 +11,10 @@ Use this skill to help a user turn waveform archives into a reproducible earthqu
 
 The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable waveform files, runs the bundled SeismicX PNSN TorchScript picker, estimates P first motion, prepares or runs association, locates events with a velocity model, calculates ML, summarizes activity, plots event maps, and can locally clone/build optional engines.
 
+## Agent Compatibility
+
+Use this repository as a generic agent skill. `SKILL.md` is the canonical workflow. `AGENTS.md` is provided for OpenCode and other agents that load the AGENTS.md convention. `CLAUDE.md` is provided for Claude Code. All entry files point to the same helper script and references.
+
 ## Workflow
 
 1. Confirm inputs: waveform directory, station metadata, response or StationXML if ML is required, velocity model, desired phases, and preferred association/location engines.
@@ -22,8 +26,9 @@ The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable wav
    `python scripts/seismicx_catalog.py list-models`
 5. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Use `classic` only as a no-model smoke-test fallback:
    `python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
-6. If REAL, HASH, or pnsn are needed locally, build or clone them before the dependent step:
-   `python scripts/seismicx_catalog.py build-tools --tool real --tools-dir external -o work/build_manifest.json`
+6. If REAL, HASH, pnsn, `bayes_location`, or `seismological-ai-tools` are needed locally, download/build them before the dependent step:
+   `python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json`
+   Use `--tool real` without `--skip-build` to compile REAL when `gfortran` is available. Use `--tool hash --hash-source ./pyhash` only when a local HASH/pyhash source tree is present.
 7. Associate picks with the user's selected engine and always write associated picks with `event_id`:
    `python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv`
 8. Recompute or QC first motion on associated picks:
