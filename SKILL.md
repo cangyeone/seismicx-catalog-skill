@@ -35,8 +35,8 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
    `python scripts/seismicx_catalog.py polarity -p work/picks_associated.csv -o work/picks_with_polarity.csv`
 9. Locate associated events. Always require a velocity model for production work. Use the grid solver for a baseline, or export/run `cangyeone/bayes_location` through `--method bayes` when the user requests it:
    `python scripts/seismicx_catalog.py locate --method grid -p work/picks_with_polarity.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv`
-10. Calculate ML only after confirming amplitude units and response metadata:
-   `python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml -o work/events_ml.csv --station-output work/station_ml.csv`
+10. Calculate ML with the seedtools-style response simulation and amplitude measurement path. Prefer StationXML, RESP directories, dataless metadata, or a seedtools `sta.resp.path` mapping; choose the regional curve such as `R13`:
+   `python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml --region R13 -o work/events_ml.csv --station-output work/station_ml.csv`
 11. Compute a first-motion focal-mechanism baseline or export HASH input, then produce the final merged catalog:
    `python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv`
 12. Analyze and plot:
@@ -55,5 +55,5 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
 
 - Do not commit or publish raw waveform archives, generated catalogs, large model weights, compiled binaries, `.so` files, or external cloned repositories unless the user explicitly asks. Compact in-house bundled models listed in `assets/models/model_registry.json` are part of this skill.
 - Keep each intermediate artifact explicit: waveform scan, picks, association assignments, located events, station magnitudes, polarity table, and plots.
-- Record the selected phases, picker, association method, velocity model, magnitude formula, and external tool commit paths in the final run notes.
+- Record the selected phases, picker, association method, velocity model, magnitude method, response source, regional R curve, and external tool commit paths in the final run notes.
 - Treat automatic catalogs as candidates until QC checks pass: station coverage, duplicate picks, event residuals, ML outliers, first-motion quality, and map sanity.

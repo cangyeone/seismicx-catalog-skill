@@ -12,7 +12,7 @@ This repository packages a publishable, agent-agnostic skill for end-to-end eart
 - Pick user-selected phases such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
 - Associate picks with GaMMA or REAL, with local build support for REAL.
 - Locate events with an explicit velocity model, including a hook for `cangyeone/bayes_location`.
-- Calculate local magnitude ML with station-level outputs.
+- Calculate local magnitude ML with seedtools-style response simulation, horizontal-component amplitude measurement, regional R curves, and station-level outputs.
 - Summarize seismic activity and plot locations with Cartopy when available.
 - Estimate P first-motion polarity and support HASH/pyhash focal-mechanism workflows with local build support.
 
@@ -57,7 +57,7 @@ python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picke
 python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv
 python scripts/seismicx_catalog.py polarity -p work/picks_associated.csv -o work/picks_with_polarity.csv
 python scripts/seismicx_catalog.py locate -p work/picks_with_polarity.csv -s stations.csv -v velocity_model.csv -o work/events_located.csv
-python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv -o work/events_ml.csv --station-output work/station_ml.csv
+python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml --region R13 -o work/events_ml.csv --station-output work/station_ml.csv
 python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv
 ```
 

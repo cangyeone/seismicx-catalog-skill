@@ -12,6 +12,7 @@ under assets/models and are described by assets/models/model_registry.json.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import json
 import math
@@ -309,6 +310,15 @@ def read_waveform(path: str | Path, headonly: bool = False) -> Any:
 
 def waveform_path_tokens(value: str | Path) -> list[str]:
     return [part for part in str(value).split(";") if part]
+
+
+def combine_waveform_paths(rows: Iterable[dict[str, str]]) -> str:
+    paths: list[str] = []
+    for row in rows:
+        for path in waveform_path_tokens(row.get("waveform_path", "")):
+            if path and path not in paths:
+                paths.append(path)
+    return ";".join(paths)
 
 
 def read_waveform_field(value: str | Path, headonly: bool = False) -> Any:
@@ -1407,12 +1417,200 @@ def load_inventory(path: str | None) -> Any | None:
     if not path:
         return None
     obspy = import_obspy()
-    return obspy.read_inventory(path)
+    source = Path(path)
+    if source.is_dir():
+        inventory = None
+        patterns = ("RESP*", "*.resp", "*.RESP", "*.xml", "*.XML", "*.dataless", "*.seed", "*.SEED")
+        files: list[Path] = []
+        for pattern in patterns:
+            files.extend(sorted(source.rglob(pattern)))
+        for file_path in files:
+            try:
+                inv = obspy.read_inventory(str(file_path))
+            except Exception:
+                continue
+            inventory = inv if inventory is None else inventory + inv
+        if inventory is None:
+            raise CatalogError(f"No readable response files found in inventory directory: {path}")
+        return inventory
+    try:
+        return obspy.read_inventory(str(source))
+    except Exception:
+        text = source.read_text(encoding="utf-8").strip()
+        mapping = ast.literal_eval(text)
+        if not isinstance(mapping, dict):
+            raise
+        inventory = None
+        for response_path in mapping.values():
+            try:
+                inv = obspy.read_inventory(str(response_path))
+            except Exception:
+                continue
+            inventory = inv if inventory is None else inventory + inv
+        if inventory is None:
+            raise CatalogError(f"No readable response paths found in mapping file: {path}")
+        return inventory
 
 
 def station_for_pick(row: dict[str, str], stations: dict[str, Station]) -> Station | None:
     sid = station_id(row.get("network", ""), row.get("station", ""), row.get("location", ""))
     return stations.get(sid) or stations.get(station_id(row.get("network", ""), row.get("station", "")))
+
+
+def seedtools_width_time(distance_degree: float) -> float:
+    if distance_degree <= 2.0:
+        return 5.0
+    if distance_degree <= 3.0:
+        return 7.0
+    if distance_degree <= 4.0:
+        return 10.0
+    if distance_degree <= 5.0:
+        return 12.0
+    if distance_degree <= 6.0:
+        return 15.0
+    if distance_degree <= 7.0:
+        return 18.0
+    if distance_degree <= 8.0:
+        return 20.0
+    if distance_degree <= 9.0:
+        return 22.0
+    if distance_degree <= 10.0:
+        return 24.0
+    return float("inf")
+
+
+def seedtools_r_curve(which_r: str) -> list[float]:
+    curves = {
+        "R11": [1.9, 1.9, 2.0, 2.2, 2.3, 2.5, 2.7, 2.9, 2.9, 3.0, 3.1, 3.2, 3.3, 3.3, 3.4, 3.3, 3.4, 3.4, 3.5, 3.5, 3.6, 3.6, 3.7, 3.7, 3.8, 3.8, 3.9, 3.9, 3.9, 3.9, 4.0, 4.1, 4.1, 4.1, 4.2, 4.2, 4.3, 4.2, 4.3, 4.3, 4.4, 4.4, 4.4, 4.5, 4.5, 4.5, 4.5, 4.6, 4.6, 4.6, 4.6, 4.6, 4.6, 4.7, 4.8, 4.8, 4.8, 4.8, 4.8, 4.9, 4.8, 4.9, 4.9, 5.0, 5.0, 5.1, 5.2, 5.2, 5.2, 5.2, 5.3, 5.3],
+        "R12": [1.8, 1.8, 1.9, 2.1, 2.2, 2.4, 2.6, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.3, 3.4, 3.3, 3.4, 3.4, 3.5, 3.5, 3.6, 3.6, 3.7, 3.7, 3.8, 3.7, 3.8, 3.9, 4.0, 4.0, 4.1, 4.1, 4.2, 4.2, 4.2, 4.3, 4.4, 4.4, 4.5, 4.4, 4.5, 4.5, 4.5, 4.6, 4.6, 4.6, 4.6, 4.7, 4.7, 4.7, 4.7, 4.7, 4.7, 4.7, 4.7, 4.8, 4.8, 4.8, 4.8, 4.9, 4.9, 4.9, 4.9, 5.0, 5.0, 5.1, 5.2, 5.2, 5.2, 5.2, 5.3, 5.3],
+        "R13": [2.0, 2.0, 2.0, 2.1, 2.2, 2.4, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.2, 3.3, 3.3, 3.4, 3.4, 3.5, 3.5, 3.6, 3.6, 3.7, 3.7, 3.8, 3.8, 3.9, 3.9, 3.9, 3.9, 4.0, 4.0, 4.0, 4.1, 4.2, 4.1, 4.2, 4.3, 4.4, 4.4, 4.5, 4.5, 4.5, 4.5, 4.5, 4.6, 4.6, 4.7, 4.7, 4.8, 4.8, 4.8, 4.8, 4.8, 4.8, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 5.0, 5.0, 5.1, 5.2, 5.2, 5.2, 5.2, 5.3, 5.3],
+        "R14": [2.0, 2.0, 2.1, 2.2, 2.3, 2.5, 2.6, 2.8, 2.9, 3.0, 3.1, 3.2, 3.2, 3.2, 3.3, 3.4, 3.5, 3.5, 3.6, 3.6, 3.7, 3.7, 3.8, 3.7, 3.8, 3.8, 3.9, 3.9, 4.0, 4.0, 4.1, 4.1, 4.1, 4.1, 4.2, 4.1, 4.2, 4.2, 4.3, 4.3, 4.4, 4.4, 4.5, 4.5, 4.4, 4.5, 4.5, 4.5, 4.6, 4.7, 4.8, 4.8, 4.8, 4.8, 4.8, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 5.0, 5.0, 5.1, 5.2, 5.2, 5.2, 5.2, 5.3, 5.3],
+        "R15": [2.0, 2.0, 2.1, 2.2, 2.3, 2.5, 2.6, 2.8, 2.8, 2.9, 3.0, 3.1, 3.2, 3.2, 3.3, 3.3, 3.4, 3.4, 3.6, 3.6, 3.6, 3.6, 3.7, 3.7, 3.8, 3.8, 3.9, 3.9, 3.9, 4.0, 4.0, 4.0, 4.1, 4.1, 4.2, 4.1, 4.2, 4.3, 4.4, 4.4, 4.4, 4.4, 4.5, 4.5, 4.5, 4.5, 4.5, 4.6, 4.7, 4.7, 4.8, 4.8, 4.8, 4.8, 4.8, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 4.9, 5.0, 5.0, 5.1, 5.2, 5.2, 5.2, 5.2, 5.3, 5.3],
+    }
+    key = which_r.upper()
+    if key not in curves:
+        raise CatalogError(f"Unknown seedtools ML region {which_r}; choose R11, R12, R13, R14, or R15.")
+    return curves[key]
+
+
+def calculate_seedtools_dd1_ml(max_amp_um: float, epi_dist_km: float, which_r: str) -> float:
+    import numpy as np
+
+    dists = np.array([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 75, 85, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350, 360, 370, 380, 390, 400, 420, 430, 440, 450, 460, 470, 500, 510, 530, 540, 550, 560, 570, 580, 600, 610, 620, 650, 700, 750, 800, 850, 900, 1000], dtype=float)
+    r_values = np.array(seedtools_r_curve(which_r), dtype=float)
+    epi_dist_km = float(max(epi_dist_km, 0.0))
+    idx = int(np.abs(dists - epi_dist_km).argmin())
+    if idx == 0:
+        slope = (r_values[1] - r_values[0]) / (dists[1] - dists[0])
+    elif idx >= len(dists) - 1:
+        slope = (r_values[-1] - r_values[-2]) / (dists[-1] - dists[-2])
+    elif epi_dist_km >= dists[idx]:
+        slope = (r_values[idx + 1] - r_values[idx]) / (dists[idx + 1] - dists[idx])
+    else:
+        slope = (r_values[idx] - r_values[idx - 1]) / (dists[idx] - dists[idx - 1])
+    return math.log10(max_amp_um) + float(r_values[idx] + (epi_dist_km - dists[idx]) * slope)
+
+
+def measure_local_period(data: Any, index: int, sample_rate: float, offset: float) -> tuple[float, float]:
+    import numpy as np
+
+    values = np.asarray(data, dtype=float)
+    if len(values) < 3 or index <= 0 or index >= len(values) - 1:
+        return float("nan"), float("nan")
+    sign = values[index] - offset
+    if sign == 0:
+        sign = 1e-12
+    left = index
+    while left > 0 and (values[left] - offset) * sign >= 0:
+        left -= 1
+    right = index
+    while right < len(values) - 1 and (values[right] - offset) * sign >= 0:
+        right += 1
+    half_periods = []
+    if left < index:
+        half_periods.append(index - left)
+    if right > index:
+        half_periods.append(right - index)
+    if not half_periods:
+        return float("nan"), float("nan")
+    period = 2.0 * float(np.median(half_periods)) / sample_rate
+    spread = 2.0 * float(np.std(half_periods)) / sample_rate if len(half_periods) > 1 else 0.0
+    return period, spread
+
+
+def period_is_valid(period: float, period_std: float) -> bool:
+    return math.isfinite(period) and 0.01 <= period <= 5.0 and (not math.isfinite(period_std) or period_std <= 5.0)
+
+
+def find_seedtools_max_amp_um(trace: Any) -> dict[str, Any] | None:
+    import numpy as np
+
+    data = np.asarray(trace.data, dtype=float)
+    if len(data) < 3:
+        return None
+    sample_rate = float(trace.stats.sampling_rate)
+    offset = float(np.mean(data))
+    candidates = np.argsort(np.abs(data - offset))[::-1]
+    for raw_index in candidates[: min(len(candidates), 2000)]:
+        index = int(raw_index)
+        period, period_std = measure_local_period(data, index, sample_rate, offset)
+        if not period_is_valid(period, period_std):
+            continue
+        radius = max(1, int(round(period * sample_rate)))
+        start = max(0, index - radius)
+        stop = min(len(data), index + radius + 1)
+        window = data[start:stop]
+        if len(window) < max(2, int(0.02 * sample_rate)):
+            continue
+        amplitude_um = (float(np.max(window)) - float(np.min(window))) / 2.0
+        if math.isfinite(amplitude_um) and amplitude_um > 0:
+            return {
+                "amplitude_um": amplitude_um,
+                "period_s": period,
+                "period_std_s": period_std,
+                "time": trace.stats.starttime + index / sample_rate,
+                "window_start": trace.stats.starttime + start / sample_rate,
+                "window_end": trace.stats.starttime + (stop - 1) / sample_rate,
+            }
+    return None
+
+
+def simulated_displacement_trace_um(trace: Any, start: Any, end: Any, inventory: Any | None, args: argparse.Namespace) -> tuple[Any, str]:
+    tr = trace.copy()
+    tr.trim(starttime=start, endtime=end, pad=True, nearest_sample=False, fill_value=0)
+    tr.detrend("demean")
+    tr.detrend("linear")
+    tr.taper(max_percentage=0.05, max_length=5.0)
+    tr.filter("bandpass", freqmin=args.freqmin, freqmax=min(args.freqmax, 0.45 * tr.stats.sampling_rate), corners=2, zerophase=True)
+    pre_filt = tuple(args.pre_filt) if args.pre_filt else (1e-3, 1 / 60, 10.0, 20.0)
+    if inventory is None:
+        tr.data = tr.data.astype(float) * args.raw_to_mm * 1000.0
+        return tr, "raw_scaled_um"
+    tr.remove_response(
+        inventory=inventory,
+        output="VEL",
+        water_level=args.response_water_level,
+        taper=True,
+        taper_fraction=0.02,
+        pre_filt=pre_filt,
+    )
+    from obspy.signal.invsim import simulate_seismometer
+
+    remove_paz = {"gain": 1.0, "zeros": [0j], "poles": [], "sensitivity": 1.0}
+    tr.data = simulate_seismometer(
+        data=tr.data.copy(),
+        samp_rate=float(tr.stats.sampling_rate),
+        paz_remove=remove_paz,
+        remove_sensitivity=True,
+        paz_simulate=None,
+        pre_filt=pre_filt,
+        zero_mean=True,
+        taper=True,
+        taper_fraction=0.02,
+        water_level=None,
+    )
+    tr.data = tr.data * 1.0e6
+    return tr, "seedtools_response_simulated_um"
 
 
 def trace_amplitude_mm(trace: Any, start: Any, end: Any, inventory: Any | None, raw_to_mm: float) -> float:
@@ -1435,8 +1633,92 @@ def trace_amplitude_mm(trace: Any, start: Any, end: Any, inventory: Any | None, 
     return max(abs(float(value)) for value in tr.data) * scale_to_mm
 
 
-def cmd_magnitude(args: argparse.Namespace) -> int:
+def calculate_station_ml_seedtools(
+    stream: Any,
+    event: dict[str, str],
+    station_picks: list[dict[str, str]],
+    sta: Station,
+    distance_km_value: float,
+    inventory: Any | None,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
     obspy = import_obspy()
+    s_picks = [row for row in station_picks if phase_group(row.get("phase", "")) == "S"]
+    p_picks = [row for row in station_picks if phase_group(row.get("phase", "")) == "P"]
+    if s_picks:
+        reference_pick = s_picks[0]
+        s_time = obspy.UTCDateTime(reference_pick["time"])
+    elif args.allow_p_fallback and p_picks:
+        reference_pick = p_picks[0]
+        s_time = obspy.UTCDateTime(reference_pick["time"]) + args.p_fallback_s_delay
+    else:
+        return None
+
+    window_len = seedtools_width_time(distance_km_value / 111.19) if args.seedtools_window else args.window_end
+    if not math.isfinite(window_len) or window_len > 1000:
+        return None
+    start = s_time + args.window_start
+    end = s_time + window_len
+
+    component_results: dict[str, dict[str, Any]] = {}
+    quality = "raw_scaled_um"
+    for trace in stream.select(network=sta.network or "*", station=sta.station or "*", location=sta.location or "*"):
+        component = getattr(trace.stats, "channel", "")[-1:].upper()
+        if component not in {"E", "N", "1", "2"}:
+            continue
+        family = "E" if component in {"E", "1"} else "N"
+        try:
+            simulated, trace_quality = simulated_displacement_trace_um(trace, start, end, inventory, args)
+            quality = trace_quality
+            measured = find_seedtools_max_amp_um(simulated)
+        except Exception as exc:
+            eprint(f"seedtools ML simulation failed for {stream_trace_id(trace)}: {exc}")
+            continue
+        if measured:
+            component_results[family] = measured
+
+    if not component_results:
+        return None
+    amplitudes = [
+        item["amplitude_um"]
+        for item in component_results.values()
+        if math.isfinite(item["amplitude_um"]) and item["amplitude_um"] > 0
+    ]
+    if not amplitudes:
+        return None
+    if "E" in component_results and "N" in component_results:
+        max_amp_um = (component_results["E"]["amplitude_um"] + component_results["N"]["amplitude_um"]) / 2.0
+    else:
+        max_amp_um = amplitudes[0]
+    if not math.isfinite(max_amp_um) or max_amp_um <= 0:
+        return None
+
+    if args.ml_method == "seedtools-dd1":
+        ml = calculate_seedtools_dd1_ml(max_amp_um, distance_km_value, args.region)
+        method = f"seedtools-dd1-{args.region.upper()}"
+    else:
+        amplitude_mm = max_amp_um / 1000.0
+        ml = math.log10(amplitude_mm) + args.a * math.log10(distance_km_value) + args.b * distance_km_value + args.c
+        method = "wood-anderson-formula"
+
+    e_result = component_results.get("E", {})
+    n_result = component_results.get("N", {})
+    return {
+        "ml": ml,
+        "max_amp_um": max_amp_um,
+        "max_amp_e_um": e_result.get("amplitude_um", ""),
+        "max_amp_n_um": n_result.get("amplitude_um", ""),
+        "period_e_s": e_result.get("period_s", ""),
+        "period_n_s": n_result.get("period_s", ""),
+        "time_sme": datetime_to_text(e_result["time"].datetime) if e_result.get("time") else "",
+        "time_smn": datetime_to_text(n_result["time"].datetime) if n_result.get("time") else "",
+        "distance_km": distance_km_value,
+        "method": method,
+        "quality": quality,
+    }
+
+
+def cmd_magnitude(args: argparse.Namespace) -> int:
     events = {row["event_id"]: row for row in read_csv_rows(args.events) if row.get("event_id")}
     picks = read_csv_rows(args.picks)
     stations = read_stations(args.stations)
@@ -1462,38 +1744,33 @@ def cmd_magnitude(args: argparse.Namespace) -> int:
             continue
         distance = max(distance_km(event_lat, event_lon, sta.latitude, sta.longitude), args.min_distance_km)
         s_picks = [row for row in station_picks if phase_group(row.get("phase", "")) == "S"]
-        reference_pick = s_picks[0] if s_picks else station_picks[0]
-        waveform_path = reference_pick.get("waveform_path", "")
+        waveform_path = combine_waveform_paths(station_picks)
         if not waveform_path:
             continue
         try:
             if waveform_path not in stream_cache:
                 stream_cache[waveform_path] = read_waveform_field(waveform_path)
             stream = stream_cache[waveform_path]
-            pick_time = obspy.UTCDateTime(reference_pick["time"])
-            start = pick_time + args.window_start
-            end = pick_time + args.window_end
-            amplitudes = []
-            for trace in stream.select(network=sta.network or "*", station=sta.station or "*", location=sta.location or "*"):
-                component = getattr(trace.stats, "channel", "")[-1:].upper()
-                if component not in {"E", "N", "1", "2"}:
-                    continue
-                amp = trace_amplitude_mm(trace, start, end, inventory, args.raw_to_mm)
-                if math.isfinite(amp) and amp > 0:
-                    amplitudes.append(amp)
-            if not amplitudes:
+            result = calculate_station_ml_seedtools(stream, event, station_picks, sta, distance, inventory, args)
+            if result is None:
                 continue
-            amplitude_mm = max(amplitudes)
-            ml = math.log10(amplitude_mm) + args.a * math.log10(distance) + args.b * distance + args.c
+            ml = float(result["ml"])
             event_magnitudes[event_id].append(ml)
             station_rows.append(
                 {
                     "event_id": event_id,
                     "station_id": sid,
-                    "amplitude_mm": f"{amplitude_mm:.6g}",
+                    "max_amp_um": f"{result['max_amp_um']:.6g}",
+                    "max_amp_e_um": f"{result['max_amp_e_um']:.6g}" if isinstance(result["max_amp_e_um"], (float, int)) else "",
+                    "max_amp_n_um": f"{result['max_amp_n_um']:.6g}" if isinstance(result["max_amp_n_um"], (float, int)) else "",
+                    "period_e_s": f"{result['period_e_s']:.6g}" if isinstance(result["period_e_s"], (float, int)) else "",
+                    "period_n_s": f"{result['period_n_s']:.6g}" if isinstance(result["period_n_s"], (float, int)) else "",
+                    "time_sme": result["time_sme"],
+                    "time_smn": result["time_smn"],
                     "distance_km": f"{distance:.3f}",
                     "ml": f"{ml:.3f}",
-                    "quality": "response_removed" if inventory is not None else "raw_scaled",
+                    "method": result["method"],
+                    "quality": result["quality"],
                 }
             )
         except Exception as exc:
@@ -1927,9 +2204,23 @@ def cmd_catalog(args: argparse.Namespace) -> int:
         str(station_ml),
         "--raw-to-mm",
         str(args.raw_to_mm),
+        "--ml-method",
+        args.ml_method,
+        "--region",
+        args.region,
+        "--freqmin",
+        str(args.mag_freqmin),
+        "--freqmax",
+        str(args.mag_freqmax),
+        "--response-water-level",
+        str(args.response_water_level),
     ]
     if args.inventory:
         magnitude_cmd.extend(["--inventory", args.inventory])
+    if args.no_seedtools_window:
+        magnitude_cmd.append("--no-seedtools-window")
+    if args.allow_p_fallback:
+        magnitude_cmd.extend(["--allow-p-fallback", "--p-fallback-s-delay", str(args.p_fallback_s_delay)])
     run_logged(base + magnitude_cmd)
 
     run_logged(
@@ -2102,11 +2393,20 @@ def build_parser() -> argparse.ArgumentParser:
     magnitude.add_argument("-s", "--stations", required=True)
     magnitude.add_argument("-o", "--output", required=True)
     magnitude.add_argument("--station-output")
-    magnitude.add_argument("--inventory", help="StationXML or dataless metadata for response removal")
+    magnitude.add_argument("--inventory", help="StationXML, RESP file/directory, dataless metadata, or seedtools sta.resp.path mapping")
+    magnitude.add_argument("--ml-method", choices=["seedtools-dd1", "wood-anderson-formula"], default="seedtools-dd1")
+    magnitude.add_argument("--region", choices=["R11", "R12", "R13", "R14", "R15"], default="R13", help="Seedtools regional ML correction curve")
+    magnitude.add_argument("--seedtools-window", action=argparse.BooleanOptionalAction, default=True, help="Use seedtools distance-dependent S-wave amplitude window")
+    magnitude.add_argument("--allow-p-fallback", action="store_true", help="Estimate an S window from P picks when S is unavailable")
+    magnitude.add_argument("--p-fallback-s-delay", type=float, default=3.0)
     magnitude.add_argument("--window-start", type=float, default=-0.5)
     magnitude.add_argument("--window-end", type=float, default=3.0)
     magnitude.add_argument("--raw-to-mm", type=float, default=1.0)
     magnitude.add_argument("--min-distance-km", type=float, default=1.0)
+    magnitude.add_argument("--freqmin", type=float, default=0.8)
+    magnitude.add_argument("--freqmax", type=float, default=10.0)
+    magnitude.add_argument("--pre-filt", nargs=4, type=float, default=(1e-3, 1 / 60, 10.0, 20.0))
+    magnitude.add_argument("--response-water-level", type=float, default=20.0)
     magnitude.add_argument("--a", type=float, default=1.11)
     magnitude.add_argument("--b", type=float, default=0.00189)
     magnitude.add_argument("--c", type=float, default=-2.09)
@@ -2163,7 +2463,15 @@ def build_parser() -> argparse.ArgumentParser:
     catalog.add_argument("--bayes-repo")
     catalog.add_argument("--bayes-command")
     catalog.add_argument("--inventory")
+    catalog.add_argument("--ml-method", choices=["seedtools-dd1", "wood-anderson-formula"], default="seedtools-dd1")
+    catalog.add_argument("--region", choices=["R11", "R12", "R13", "R14", "R15"], default="R13")
     catalog.add_argument("--raw-to-mm", type=float, default=1.0)
+    catalog.add_argument("--mag-freqmin", type=float, default=0.8)
+    catalog.add_argument("--mag-freqmax", type=float, default=10.0)
+    catalog.add_argument("--response-water-level", type=float, default=20.0)
+    catalog.add_argument("--no-seedtools-window", action="store_true")
+    catalog.add_argument("--allow-p-fallback", action="store_true")
+    catalog.add_argument("--p-fallback-s-delay", type=float, default=3.0)
     catalog.add_argument("--polarity-min-score", type=float, default=2.0)
     catalog.add_argument("--mechanism-method", choices=["first-motion-grid", "hash-export"], default="first-motion-grid")
     catalog.add_argument("--min-polarities", type=int, default=6)

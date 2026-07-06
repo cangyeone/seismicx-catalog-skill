@@ -20,6 +20,8 @@ python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external -
 
 The final one-shot catalog is `work/catalog_run/catalog_final.csv`. For production association, prefer GaMMA or REAL over the simple smoke-test associator.
 
+ML magnitude calculation should follow the seedtools-style path: remove response to velocity, simulate/integrate to displacement, measure SME/SMN horizontal amplitudes in micrometers, and apply the selected regional R curve such as `R13`. Treat raw-scaled ML as a smoke-test fallback only.
+
 ## External Tools
 
 - Download PNSN, REAL, `bayes_location`, and `seismological-ai-tools` with `build-tools --tool all --skip-build`.
