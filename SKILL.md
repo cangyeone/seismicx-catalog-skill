@@ -1,15 +1,15 @@
 ---
 name: seismicx-catalog
-description: Automated earthquake catalog construction from local or continuous waveform directories. Use when Codex needs to process seismic waveform data such as MSEED, SAC, SEED, or any ObsPy-readable format for phase picking, first-motion polarity, REAL or GaMMA phase association, earthquake location with a velocity model including optional cangyeone/bayes_location integration, ML magnitude calculation, activity analysis, Cartopy event mapping, and HASH/pyhash focal-mechanism workflows.
+description: End-to-end earthquake detection and automatic catalog production from local or continuous waveform directories. Use when Codex needs to process seismic waveform data such as MSEED, SAC, SEED, or any ObsPy-readable format for waveform scanning, phase detection/picking, user-selected phases, first-motion polarity, REAL or GaMMA phase association, earthquake location with a velocity model including optional cangyeone/bayes_location integration, ML magnitude calculation, activity analysis, Cartopy event mapping, and HASH/pyhash focal-mechanism workflows.
 ---
 
 # SeismicX Catalog
 
 ## Overview
 
-Use this skill to help a user turn waveform archives into a reproducible earthquake catalog. Prefer a transparent pipeline with explicit intermediate CSV files over a hidden monolithic run.
+Use this skill to help a user run the full earthquake detection workflow from waveform archives to a reproducible earthquake catalog. Prefer a transparent pipeline with explicit intermediate CSV files over a hidden monolithic run.
 
-The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable waveform files, runs the bundled SeismicX PNSN TorchScript picker, estimates P first motion, prepares or runs association, locates events with a velocity model, calculates ML, summarizes activity, plots event maps, and can locally clone/build optional engines.
+The bundled helper is `scripts/seismicx_catalog.py`. It scans ObsPy-readable waveform files, detects and picks phases with the bundled SeismicX PNSN TorchScript picker, associates multi-station phases, locates events with a velocity model, calculates ML, estimates P first motion, computes or exports focal-mechanism inputs, summarizes activity, plots event maps, and can locally clone/build optional engines.
 
 ## Agent Compatibility
 
@@ -18,7 +18,7 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
 ## Workflow
 
 1. Confirm inputs: waveform directory, station metadata, response or StationXML if ML is required, velocity model, desired phases, and preferred association/location engines.
-2. For a one-shot baseline catalog, run the end-to-end wrapper. Use `--association-method gamma` when GaMMA is installed; use the default `simple` method only for smoke tests or tiny examples:
+2. For a one-shot baseline earthquake detection-to-catalog run, use the end-to-end wrapper. Use `--association-method gamma` when GaMMA is installed; use the default `simple` method only for smoke tests or tiny examples:
    `python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
 3. For controlled production work, scan waveforms first:
    `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`

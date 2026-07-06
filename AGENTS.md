@@ -1,6 +1,6 @@
 # SeismicX Catalog Agent Instructions
 
-This repository is an agent-agnostic skill for automated earthquake catalog construction. Use it when a user asks for earthquake phase detection, phase association, event location, ML magnitude, activity analysis, mapping, or focal-mechanism workflows from local waveform data.
+This repository is an agent-agnostic skill for the full earthquake detection-to-catalog workflow. Use it when a user asks for earthquake phase detection/picking, multi-station phase association, event location, ML magnitude, activity analysis, mapping, or focal-mechanism workflows from local waveform data.
 
 ## Canonical Workflow
 
@@ -18,7 +18,7 @@ python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v vel
 python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json
 ```
 
-The final one-shot catalog is `work/catalog_run/catalog_final.csv`. For production association, prefer GaMMA or REAL over the simple smoke-test associator.
+The final one-shot output is `work/catalog_run/catalog_final.csv`, produced after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps. For production association, prefer GaMMA or REAL over the simple smoke-test associator.
 
 ML magnitude calculation should follow the seedtools-style path: remove response to velocity, simulate/integrate to displacement, measure SME/SMN horizontal amplitudes in micrometers, and apply the selected regional R curve such as `R13`. Treat raw-scaled ML as a smoke-test fallback only.
 

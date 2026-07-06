@@ -1,7 +1,7 @@
 interface:
   display_name: "SeismicX Catalog"
-  short_description: "Automated earthquake cataloging workflows"
+  short_description: "Earthquake detection-to-catalog workflow"
   icon_small: "./assets/logo.png"
   icon_large: "./assets/logo.png"
   brand_color: "#0F766E"
-  default_prompt: "Use $seismicx-catalog to build an automated earthquake catalog from waveform data."
+  default_prompt: "Use $seismicx-catalog to run earthquake detection and build a final catalog from waveform data."

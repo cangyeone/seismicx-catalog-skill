@@ -2,14 +2,14 @@
 
 # SeismicX Catalog Skill
 
-Agent-friendly workflows and helper tools for automated earthquake cataloging from local seismic waveform archives. The package is usable from Codex-style skills, OpenCode `AGENTS.md`, Claude Code `CLAUDE.md`, or any agent that can read Markdown instructions and run local scripts.
+Agent-friendly workflows and helper tools for full earthquake detection and automatic catalog production from local seismic waveform archives. The package is usable from Codex-style skills, OpenCode `AGENTS.md`, Claude Code `CLAUDE.md`, or any agent that can read Markdown instructions and run local scripts.
 
 ## What It Does
 
-This repository packages a publishable, agent-agnostic skill for end-to-end earthquake automatic catalog work:
+This repository packages a publishable, agent-agnostic skill for the full earthquake detection workflow, from continuous waveform directories to a final catalog with location, magnitude, and focal-mechanism products:
 
 - Analyze waveform directory structure and scan MSEED, SAC, SEED, and other ObsPy-readable formats.
-- Pick user-selected phases such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
+- Detect earthquake phases and pick user-selected arrivals such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model, plus a classic fallback for smoke tests.
 - Associate picks with GaMMA or REAL, with local build support for REAL.
 - Locate events with an explicit velocity model, including a hook for `cangyeone/bayes_location`.
 - Calculate local magnitude ML with seedtools-style response simulation, horizontal-component amplitude measurement, regional R curves, and station-level outputs.
@@ -35,7 +35,7 @@ Large waveform examples, large model weights, compiled binaries, and external re
 
 ## Quick Start
 
-One-command baseline run:
+One-command baseline detection-to-catalog run:
 
 ```bash
 python scripts/seismicx_catalog.py catalog \
@@ -45,7 +45,7 @@ python scripts/seismicx_catalog.py catalog \
   -o work/catalog_run
 ```
 
-The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes location, ML, and focal-mechanism columns when enough data are available. Add `--association-method gamma` when GaMMA is installed and configured for production association.
+The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes detected events, associated phases, locations, ML, and focal-mechanism columns when enough data are available. Add `--association-method gamma` when GaMMA is installed and configured for production association.
 
 Step-by-step run:
 

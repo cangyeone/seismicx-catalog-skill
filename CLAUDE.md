@@ -1,16 +1,16 @@
 # SeismicX Catalog Claude Code Context
 
-This repository is a generic agent skill, not a Claude-only project. Use `SKILL.md` as the canonical workflow and treat this file as a short Claude Code entrypoint.
+This repository is a generic agent skill for full earthquake detection and automatic catalog production, not a Claude-only project. Use `SKILL.md` as the canonical workflow and treat this file as a short Claude Code entrypoint.
 
 ## What To Do
 
-- For end-to-end cataloging, run:
+- For end-to-end earthquake detection-to-catalog work, run:
 
 ```bash
 python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run
 ```
 
-- The final catalog is `work/catalog_run/catalog_final.csv`.
+- The final catalog is `work/catalog_run/catalog_final.csv`, after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps.
 - ML should use the seedtools-style response simulation path: response removal to velocity, velocity-to-displacement simulation, SME/SMN horizontal amplitude measurement in micrometers, and a regional R curve such as `R13`.
 - Use `references/` only as needed:
   - `data-contracts.md` for schemas and converters.
