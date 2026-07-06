@@ -1148,7 +1148,7 @@ def clone_or_update(url: str, destination: Path) -> None:
     if destination.exists() and any(destination.iterdir()):
         raise CatalogError(f"Destination exists and is not an empty git repository: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    run_logged(["git", "clone", url, str(destination)])
+    run_logged(["git", "clone", "--depth", "1", url, str(destination)])
 
 
 def clone_without_ds_store(url: str, destination: Path) -> None:
@@ -1158,7 +1158,7 @@ def clone_without_ds_store(url: str, destination: Path) -> None:
     if destination.exists() and any(destination.iterdir()):
         raise CatalogError(f"Destination exists and is not an empty git repository: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    run_logged(["git", "clone", "--no-checkout", url, str(destination)])
+    run_logged(["git", "clone", "--depth", "1", "--no-checkout", url, str(destination)])
     run_logged(["git", "-C", str(destination), "sparse-checkout", "init", "--no-cone"])
     run_logged(["git", "-C", str(destination), "sparse-checkout", "set", "/*", "!**/.DS_Store"])
     run_logged(["git", "-C", str(destination), "checkout"])
