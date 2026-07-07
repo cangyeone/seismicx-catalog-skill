@@ -4,6 +4,52 @@
 
 Agent-friendly workflows and helper tools for full earthquake detection and automatic catalog production from local seismic waveform archives. The package is usable from Codex-style skills, OpenCode `AGENTS.md`, Claude Code `CLAUDE.md`, or any agent that can read Markdown instructions and run local scripts.
 
+## Install The Skill
+
+In OpenCode, start a session and type:
+
+```text
+Download https://github.com/cangyeone/seismicx-catalog-skill and install it as a SKILL.
+```
+
+The agent should clone this repository, keep `SKILL.md` in the skill root, and place the folder where OpenCode can load user skills. Other agent systems can use the same repository directly because the root also includes `AGENTS.md` and `CLAUDE.md`.
+
+## Use It In OpenCode
+
+After installation, open a project directory that contains your seismic data and type:
+
+```text
+Based on the data in the current directory, build an earthquake catalog.
+```
+
+The skill is designed so the agent can run the full detection-to-catalog workflow:
+
+1. scan the waveform directory;
+2. detect and pick phases from continuous waveforms without filtering them;
+3. associate multi-station picks with GaMMA or REAL;
+4. locate events with a velocity model;
+5. calculate ML magnitude;
+6. estimate first-motion polarity and focal mechanisms when enough data exist;
+7. write the final catalog, station magnitudes, activity summary, and maps.
+
+For best results, give the agent the key paths in plain language:
+
+```text
+My continuous waveforms are in ./waveforms, stations are in ./stations.csv,
+the velocity model is ./velocity_model.csv, and the StationXML file is ./stations.xml.
+Use the PNSN picker, Pg/Sg/Pn/Sn phases, GaMMA association, and R13 ML.
+```
+
+Useful input files are:
+
+- waveform directory: MSEED, SAC, SEED, or any ObsPy-readable waveform format;
+- station table: start from `assets/stations_template.csv` if needed;
+- velocity model: start from `assets/velocity_model_example.csv` if needed;
+- response metadata for calibrated ML: StationXML, RESP/dataless metadata, or a seedtools-style response mapping;
+- optional external tools: REAL, HASH/pyhash, `bayes_location`, PNSN, or `seismological-ai-tools`.
+
+Do not bandpass, highpass, or lowpass continuous waveforms before the phase-picking step. The bundled PNSN model expects the original waveform stream.
+
 ## What It Does
 
 This repository packages a publishable, agent-agnostic skill for the full earthquake detection workflow, from continuous waveform directories to a final catalog with location, magnitude, and focal-mechanism products:
@@ -33,7 +79,9 @@ LICENSE
 
 Large waveform examples, large model weights, compiled binaries, and external repositories are intentionally not published in the skill package. The repository does include compact in-house bundled models under `assets/models/`: `pnsn.v3.jit` for Pg/Sg/Pn/Sn picking and `polar.jit` for first-motion polarity workflows.
 
-## Quick Start
+## Manual CLI Quick Start
+
+Most users can work through OpenCode or another agent with the natural-language prompts above. The commands below are for manual runs, debugging, or reproducing what the agent does.
 
 One-command baseline detection-to-catalog run:
 
