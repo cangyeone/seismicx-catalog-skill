@@ -14,11 +14,11 @@ This repository is an agent-agnostic skill for the full earthquake detection-to-
 
 ```bash
 python scripts/seismicx_catalog.py list-models
-python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run
+python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --association-method gamma
 python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json
 ```
 
-The final one-shot output is `work/catalog_run/catalog_final.csv`, produced after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps. For production association, prefer GaMMA or REAL over the simple smoke-test associator.
+The final one-shot output is `work/catalog_run/catalog_final.csv`, produced after waveform scanning, phase detection, association, location, ML, and focal-mechanism steps. For production association, prefer GaMMA or REAL over the simple smoke-test associator; the end-to-end `catalog` command requires `--smoke-test-simple` before it will run the simple path.
 
 Continuous-waveform phase picking must remain unfiltered. Do not apply bandpass, highpass, or lowpass filters before the PNSN picker or inside the default `pick`/`catalog` detection path. Use filtering only when the user explicitly requests a classic STA/LTA smoke-test experiment or during later response/magnitude processing.
 
@@ -26,6 +26,7 @@ ML magnitude calculation should follow the seedtools-style path: remove response
 
 ## External Tools
 
+- Install GaMMA for production association: `python -m pip install "git+https://github.com/wayneweiqiang/GaMMA.git"`.
 - Download PNSN, REAL, `bayes_location`, and `seismological-ai-tools` with `build-tools --tool all --skip-build`.
 - Compile REAL with `build-tools --tool real` when `gfortran` is available.
 - Compile HASH/pyhash only from an explicit local source tree: `build-tools --tool hash --hash-source ./pyhash`.
@@ -38,10 +39,11 @@ Before finishing changes, run:
 ```bash
 python -m py_compile scripts/seismicx_catalog.py
 python scripts/seismicx_catalog.py list-models
+python scripts/smoke_test.py
 ```
 
 If the skill structure changed, also run the local skill validator when available:
 
 ```bash
-python /Users/yuziye/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
+python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
 ```

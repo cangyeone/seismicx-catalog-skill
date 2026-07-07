@@ -101,10 +101,25 @@ python scripts/seismicx_catalog.py catalog \
   -w <waveforms> \
   -s stations.csv \
   -v velocity_model.csv \
-  -o work/catalog_run
+  -o work/catalog_run \
+  --association-method gamma
 ```
 
-The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes detected events, associated phases, locations, ML, and focal-mechanism columns when enough data are available. Add `--association-method gamma` when GaMMA is installed and configured for production association.
+The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes detected events, associated phases, locations, ML, and focal-mechanism columns when enough data are available. Use `--association-method simple --smoke-test-simple` only for tiny smoke tests that intentionally use the simple time-window associator.
+
+## Dependencies
+
+Core waveform operations require ObsPy. The bundled PNSN picker requires PyTorch. Production association uses GaMMA, which can be installed into the active environment with:
+
+```bash
+python -m pip install "git+https://github.com/wayneweiqiang/GaMMA.git"
+```
+
+The contributor smoke test also exercises SciPy, Matplotlib/Cartopy-capable plotting paths when available, and the bundled TorchScript models:
+
+```bash
+python scripts/smoke_test.py
+```
 
 Step-by-step run:
 
