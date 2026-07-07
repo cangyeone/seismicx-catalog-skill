@@ -321,6 +321,10 @@ def combine_waveform_paths(rows: Iterable[dict[str, str]]) -> str:
     return ";".join(paths)
 
 
+def join_waveform_paths(paths: Iterable[str]) -> str:
+    return ";".join(sorted(path for path in paths if path))
+
+
 def read_waveform_field(value: str | Path, headonly: bool = False) -> Any:
     paths = waveform_path_tokens(value)
     if len(paths) <= 1:
@@ -374,6 +378,14 @@ def read_stations(path: str | Path) -> dict[str, Station]:
     return aliases
 
 
+def canonical_station_values(stations: dict[str, Station]) -> list[Station]:
+    unique: dict[tuple[str, str, str], Station] = {}
+    for sta in stations.values():
+        key = (sta.network, sta.station, sta.location)
+        unique.setdefault(key, sta)
+    return list(unique.values())
+
+
 def read_velocity_model(path: str | Path | None) -> list[VelocityLayer]:
     if not path:
         return [VelocityLayer(0.0, 6.0, 3.5)]
@@ -419,6 +431,13 @@ def project_lonlat(lon: float, lat: float, lon0: float, lat0: float) -> tuple[fl
     x = (lon - lon0) * 111.32 * math.cos(math.radians(lat0))
     y = (lat - lat0) * 110.57
     return x, y
+
+
+def unproject_lonlat(x_km: float, y_km: float, lon0: float, lat0: float) -> tuple[float, float]:
+    cos_lat = math.cos(math.radians(lat0))
+    lon = lon0 if abs(cos_lat) < 1e-12 else lon0 + x_km / (111.32 * cos_lat)
+    lat = lat0 + y_km / 110.57
+    return lon, lat
 
 
 def stream_trace_id(trace: Any) -> str:
@@ -533,10 +552,12 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 
     magnitude:
       type: ML
-      formula: "log10(A_mm) + a*log10(R_km) + b*R_km + c"
-      a: 1.11
-      b: 0.00189
-      c: -2.09
+      method: seedtools-dd1
+      region: R13
+      amplitude_unit: micrometer
+      response_source: StationXML_or_RESP_required_for_calibrated_ML
+      seedtools_window: true
+      raw_to_mm: 1.0
 
     focal_mechanism:
       first_motion: true
@@ -729,9 +750,10 @@ def torchscript_pnsn_pick_files(paths: Sequence[Path], requested: set[str], args
         network, station, location, _ = key
         try:
             if not all(family in entry["families"] for family in ("E", "N", "Z")):
-                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "missing E/N/Z components"})
+                errors.append({"path": join_waveform_paths(entry["paths"]), "error": "missing E/N/Z components"})
                 continue
             stream = Stream()
+            waveform_path = join_waveform_paths(entry["paths"])
             for source in sorted(entry["paths"]):
                 try:
                     source_stream = read_waveform(source)
@@ -742,13 +764,13 @@ def torchscript_pnsn_pick_files(paths: Sequence[Path], requested: set[str], args
                     if matches_station_day(trace, key):
                         stream.append(trace)
             if not stream:
-                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "no readable matching traces"})
+                errors.append({"path": waveform_path, "error": "no readable matching traces"})
                 continue
             stream.merge(fill_value=0)
             stream.resample(samplerate)
             components = select_three_components(stream)
             if not components:
-                errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": "missing E/N/Z components"})
+                errors.append({"path": waveform_path, "error": "missing E/N/Z components"})
                 continue
             start = min(trace.stats.starttime for _, trace in components)
             end = max(trace.stats.endtime for _, trace in components)
@@ -770,7 +792,6 @@ def torchscript_pnsn_pick_files(paths: Sequence[Path], requested: set[str], args
                 continue
             if output.ndim == 1:
                 output = output.reshape(1, -1)
-            waveform_path = ";".join(sorted(entry["paths"])[:3])
             z_trace = component_traces["Z"]
             z_data = np.asarray(z_trace.data[:npts], dtype=float)
             for row in output:
@@ -818,7 +839,7 @@ def torchscript_pnsn_pick_files(paths: Sequence[Path], requested: set[str], args
                     }
                 )
         except Exception as exc:
-            errors.append({"path": ";".join(sorted(entry["paths"])[:3]), "error": str(exc)})
+            errors.append({"path": join_waveform_paths(entry["paths"]), "error": str(exc)})
     return all_picks, errors
 
 
@@ -988,16 +1009,67 @@ def cmd_associate_simple(args: argparse.Namespace) -> int:
     return 0
 
 
-def assignment_event_id(row: dict[str, Any]) -> str:
-    for key in ("event_id", "event_index", "event_idx", "cluster_index", "id"):
-        value = row.get(key)
-        if value not in (None, ""):
-            try:
-                return f"ev{int(float(value)) + 1:06d}"
-            except (TypeError, ValueError):
-                text = str(value)
-                return text if text.startswith("ev") else f"ev{text}"
-    return ""
+def gamma_event_index(value: Any, fallback: int) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def format_optional_float(value: Any, precision: int = 3) -> str:
+    number = parse_float(value)
+    if not math.isfinite(number):
+        return ""
+    return f"{number:.{precision}f}"
+
+
+def normalize_gamma_assignment(record: Any) -> tuple[int, int, float] | None:
+    if isinstance(record, dict):
+        pick_value = record.get("pick_index", record.get("pick_idx", record.get(0)))
+        event_value = record.get("event_index", record.get("event_idx", record.get("event_id", record.get(1))))
+        score_value = record.get("gamma_score", record.get("probability", record.get("score", record.get(2, ""))))
+    elif isinstance(record, (list, tuple)) and len(record) >= 2:
+        pick_value = record[0]
+        event_value = record[1]
+        score_value = record[2] if len(record) > 2 else ""
+    else:
+        return None
+    try:
+        pick_index = int(float(pick_value))
+        event_index = int(float(event_value))
+    except (TypeError, ValueError):
+        return None
+    score = parse_float(score_value, float("nan"))
+    return pick_index, event_index, score
+
+
+def gamma_xy_bounds(
+    station_records: Sequence[dict[str, Any]],
+    lon0: float,
+    lat0: float,
+    args: argparse.Namespace,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    xs = [parse_float(row.get("x(km)")) for row in station_records]
+    ys = [parse_float(row.get("y(km)")) for row in station_records]
+    xs = [value for value in xs if math.isfinite(value)]
+    ys = [value for value in ys if math.isfinite(value)]
+    if not xs or not ys:
+        raise CatalogError("No valid station coordinates available for GaMMA association.")
+
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    if args.min_longitude is not None and args.max_longitude is not None:
+        x_a, _ = project_lonlat(args.min_longitude, lat0, lon0, lat0)
+        x_b, _ = project_lonlat(args.max_longitude, lat0, lon0, lat0)
+        x_min, x_max = min(x_a, x_b), max(x_a, x_b)
+    if args.min_latitude is not None and args.max_latitude is not None:
+        _, y_a = project_lonlat(lon0, args.min_latitude, lon0, lat0)
+        _, y_b = project_lonlat(lon0, args.max_latitude, lon0, lat0)
+        y_min, y_max = min(y_a, y_b), max(y_a, y_b)
+
+    x_pad = max(10.0, 0.2 * max(x_max - x_min, 1.0))
+    y_pad = max(10.0, 0.2 * max(y_max - y_min, 1.0))
+    return (x_min - x_pad, x_max + x_pad), (y_min - y_pad, y_max + y_pad)
 
 
 def cmd_associate_gamma(args: argparse.Namespace) -> int:
@@ -1009,14 +1081,12 @@ def cmd_associate_gamma(args: argparse.Namespace) -> int:
 
     picks = read_csv_rows(args.picks)
     stations = read_stations(args.stations)
-    canonical_stations = {sid: sta for sid, sta in stations.items() if sid.count(".") == 2}
-    if not canonical_stations:
-        canonical_stations = stations
-    lon0 = median([sta.longitude for sta in canonical_stations.values()])
-    lat0 = median([sta.latitude for sta in canonical_stations.values()])
+    canonical_stations = canonical_station_values(stations)
+    lon0 = median([sta.longitude for sta in canonical_stations])
+    lat0 = median([sta.latitude for sta in canonical_stations])
 
     station_records = []
-    for sta in canonical_stations.values():
+    for sta in canonical_stations:
         x_km, y_km = project_lonlat(sta.longitude, sta.latitude, lon0, lat0)
         station_records.append(
             {
@@ -1032,30 +1102,45 @@ def cmd_associate_gamma(args: argparse.Namespace) -> int:
         )
 
     pick_records = []
-    pick_ids = []
-    for row in picks:
+    original_indices: list[int] = []
+    pick_times: list[float] = []
+    for original_index, row in enumerate(picks):
         sid = station_id(row.get("network", ""), row.get("station", ""), row.get("location", ""))
         if sid not in stations:
             sid = station_id(row.get("network", ""), row.get("station", ""))
         if sid not in stations:
             continue
-        pick_ids.append(row.get("pick_id", ""))
+        pick_time = parse_datetime(row["time"])
+        phase = phase_group(row.get("phase", "")).lower()
+        if phase not in {"p", "s"}:
+            continue
+        pick_times.append(pick_time.timestamp())
         pick_records.append(
             {
                 "id": sid,
                 "station_id": sid,
-                "phase_time": parse_datetime(row["time"]).replace(tzinfo=None),
-                "phase_type": phase_group(row.get("phase", "")),
-                "phase_score": parse_float(row.get("score"), 1.0),
-                "phase_amplitude": max(parse_float(row.get("amplitude"), 1.0), 1e-12),
+                "timestamp": pd.Timestamp(pick_time),
+                "type": phase,
+                "prob": parse_float(row.get("score"), 1.0),
+                "amp": max(parse_float(row.get("amplitude"), 1.0), 1e-12),
             }
         )
+        original_indices.append(original_index)
+    if not pick_records:
+        raise CatalogError("No picks matched the station table for GaMMA association.")
 
+    x_bounds, y_bounds = gamma_xy_bounds(station_records, lon0, lat0, args)
+    time_span = max(pick_times) - min(pick_times) if pick_times else 0.0
+    time_bounds = (-300.0, max(300.0, time_span + 300.0))
+
+    z_bounds = (args.min_depth, args.max_depth)
     config = {
         "center": (lon0, lat0),
-        "xlim_degree": [args.min_longitude, args.max_longitude] if args.min_longitude is not None else None,
-        "ylim_degree": [args.min_latitude, args.max_latitude] if args.min_latitude is not None else None,
         "dims": ["x(km)", "y(km)", "z(km)"],
+        "x(km)": x_bounds,
+        "y(km)": y_bounds,
+        "z(km)": z_bounds,
+        "bfgs_bounds": [x_bounds, y_bounds, z_bounds, time_bounds],
         "vel": {"p": args.vp, "s": args.vs},
         "use_amplitude": args.use_amplitude,
         "use_dbscan": args.use_dbscan,
@@ -1067,35 +1152,70 @@ def cmd_associate_gamma(args: argparse.Namespace) -> int:
         "max_sigma11": args.max_sigma11,
         "max_sigma22": args.max_sigma22,
         "max_sigma12": args.max_sigma12,
-        "oversampling_factor": args.oversampling_factor,
+        "oversample_factor": max(1, int(round(args.oversampling_factor))),
     }
     config = {key: value for key, value in config.items() if value is not None}
 
     catalogs, assignments = association(
-        pd.DataFrame(pick_records),
+        pd.DataFrame(pick_records, index=original_indices),
         pd.DataFrame(station_records),
         config,
         method=args.gamma_method,
     )
-    catalogs.to_csv(args.output, index=False)
-    assignment_df = pd.DataFrame(assignments)
+
+    raw_events = catalogs.to_dict("records") if hasattr(catalogs, "to_dict") else list(catalogs)
+    raw_events = [dict(row) for row in raw_events]
+    raw_events.sort(key=lambda row: (str(row.get("time", "")), gamma_event_index(row.get("event_index"), 0)))
+    event_id_by_gamma_index: dict[int, str] = {}
+    event_rows: list[dict[str, Any]] = []
+    for event_number, event in enumerate(raw_events, start=1):
+        raw_event_index = gamma_event_index(event.get("event_index"), event_number)
+        event_id = f"ev{event_number:06d}"
+        event_id_by_gamma_index[raw_event_index] = event_id
+        x_km = parse_float(event.get("x(km)"))
+        y_km = parse_float(event.get("y(km)"))
+        lon, lat = unproject_lonlat(x_km, y_km, lon0, lat0) if math.isfinite(x_km) and math.isfinite(y_km) else (float("nan"), float("nan"))
+        origin_time = datetime_to_text(parse_datetime(event["time"])) if event.get("time") else ""
+        event_rows.append(
+            {
+                "event_id": event_id,
+                "origin_time": origin_time,
+                "latitude": format_optional_float(lat, 6),
+                "longitude": format_optional_float(lon, 6),
+                "depth_km": format_optional_float(event.get("z(km)"), 3),
+                "magnitude": "",
+                "magnitude_type": "",
+                "rms": format_optional_float(event.get("sigma_time"), 3),
+                "n_picks": int(parse_float(event.get("num_picks"), 0)),
+                "method": f"gamma-{args.gamma_method}",
+            }
+        )
+    write_csv_rows(args.output, event_rows, EVENT_FIELDS)
+
+    normalized_assignments = [item for item in (normalize_gamma_assignment(record) for record in assignments) if item is not None]
+    associated = [dict(row) for row in picks]
+    assignment_rows: list[dict[str, Any]] = []
+    for pick_index, raw_event_index, score in normalized_assignments:
+        event_id = event_id_by_gamma_index.get(raw_event_index)
+        if not event_id or not (0 <= pick_index < len(associated)):
+            continue
+        associated[pick_index]["event_id"] = event_id
+        assignment_rows.append(
+            {
+                "event_id": event_id,
+                "pick_id": associated[pick_index].get("pick_id", ""),
+                "pick_index": pick_index,
+                "gamma_event_index": raw_event_index,
+                "gamma_score": f"{score:.6g}" if math.isfinite(score) else "",
+                "time": associated[pick_index].get("time", ""),
+                "phase": associated[pick_index].get("phase", ""),
+            }
+        )
     if args.assignments:
-        if len(assignment_df) and "pick_index" in assignment_df.columns:
-            assignment_df["pick_id"] = assignment_df["pick_index"].apply(lambda idx: pick_ids[int(idx)] if int(idx) < len(pick_ids) else "")
-        assignment_df.to_csv(args.assignments, index=False)
+        write_csv_rows(args.assignments, assignment_rows, ["event_id", "pick_id", "pick_index", "gamma_event_index", "gamma_score", "time", "phase"])
     if args.associated_picks:
-        associated = [dict(row) for row in picks]
-        if len(assignment_df):
-            for record in assignment_df.to_dict("records"):
-                pick_index = record.get("pick_index")
-                try:
-                    index = int(pick_index)
-                except (TypeError, ValueError):
-                    continue
-                if 0 <= index < len(associated):
-                    associated[index]["event_id"] = assignment_event_id(record)
         write_csv_rows(args.associated_picks, associated, PICK_FIELDS)
-    eprint(f"gamma_events={len(catalogs)}")
+    eprint(f"gamma_events={len(event_rows)} gamma_assignments={len(assignment_rows)}")
     return 0
 
 
@@ -1106,7 +1226,7 @@ def prepare_real_workspace(args: argparse.Namespace) -> dict[str, str]:
     stations = read_stations(args.stations)
     station_path = workdir / "stations.csv"
     pick_path = workdir / "picks.csv"
-    write_csv_rows(station_path, [asdict(sta) for key, sta in stations.items() if key.count(".") == 2], STATION_FIELDS)
+    write_csv_rows(station_path, [asdict(sta) for sta in canonical_station_values(stations)], STATION_FIELDS)
     write_csv_rows(pick_path, picks, PICK_FIELDS)
     return {"workdir": str(workdir), "stations": str(station_path), "picks": str(pick_path), "output": str(args.output)}
 
@@ -1350,7 +1470,7 @@ def cmd_locate_bayes(args: argparse.Namespace) -> int:
         payload = {
             "events": read_csv_rows(args.events) if args.events else [],
             "picks": read_csv_rows(args.picks),
-            "stations": [asdict(sta) for key, sta in read_stations(args.stations).items() if key.count(".") == 2],
+            "stations": [asdict(sta) for sta in canonical_station_values(read_stations(args.stations))],
             "velocity_model": [asdict(layer) for layer in read_velocity_model(args.velocity_model)],
             "note": "Pass this JSON to a local bayes_location adapter or rerun with --bayes-command.",
         }
@@ -1385,11 +1505,8 @@ def cmd_locate(args: argparse.Namespace) -> int:
         event_id = row.get("event_id") or row.get("event_index") or row.get("gamma_event_index")
         if event_id:
             grouped[str(event_id)].append(row)
-    if not grouped and args.events:
-        for row in picks:
-            grouped["ev000001"].append(row)
     if not grouped:
-        raise CatalogError("Picks must include event_id, or provide associated picks before location.")
+        raise CatalogError("Picks must include event_id before location. Run associate with --associated-picks or convert external assignments first.")
 
     output_rows = []
     for event_id, event_picks in grouped.items():
@@ -2082,9 +2199,9 @@ def cmd_plot(args: argparse.Namespace) -> int:
         scatter_kwargs["transform"] = transform
     sc = ax.scatter(lons, lats, **scatter_kwargs)
     if stations:
-        station_values = {key: sta for key, sta in stations.items() if key.count(".") == 2}
-        sx = [sta.longitude for sta in station_values.values()]
-        sy = [sta.latitude for sta in station_values.values()]
+        station_values = canonical_station_values(stations)
+        sx = [sta.longitude for sta in station_values]
+        sy = [sta.latitude for sta in station_values]
         station_kwargs = {"marker": "^", "s": 28, "c": "#d94801", "edgecolors": "black", "linewidths": 0.3, "label": "Stations"}
         if transform is not None:
             station_kwargs["transform"] = transform
@@ -2103,6 +2220,11 @@ def cmd_plot(args: argparse.Namespace) -> int:
 
 
 def cmd_catalog(args: argparse.Namespace) -> int:
+    if args.location_method == "bayes" and not args.bayes_command:
+        raise CatalogError("catalog --location-method bayes requires --bayes-command. Use locate --method bayes separately to export a bayes_location JSON payload.")
+    if args.association_method == "simple" and not args.smoke_test_simple:
+        raise CatalogError("catalog --association-method simple is a smoke-test path. Pass --smoke-test-simple to use it intentionally, or use --association-method gamma for production association.")
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     script = str(Path(__file__).resolve())
@@ -2169,6 +2291,10 @@ def cmd_catalog(args: argparse.Namespace) -> int:
         str(args.min_p_picks_per_eq),
         "--min-s-picks-per-eq",
         str(args.min_s_picks_per_eq),
+        "--min-depth",
+        str(args.association_min_depth),
+        "--max-depth",
+        str(args.association_max_depth),
     ]
     run_logged(base + associate_cmd)
 
@@ -2359,6 +2485,8 @@ def build_parser() -> argparse.ArgumentParser:
     associate.add_argument("--max-sigma22", type=float, default=1.0)
     associate.add_argument("--max-sigma12", type=float, default=1.0)
     associate.add_argument("--oversampling-factor", type=float, default=10.0)
+    associate.add_argument("--min-depth", type=float, default=0.0)
+    associate.add_argument("--max-depth", type=float, default=30.0)
     associate.add_argument("--min-longitude", type=float)
     associate.add_argument("--max-longitude", type=float)
     associate.add_argument("--min-latitude", type=float)
@@ -2461,10 +2589,13 @@ def build_parser() -> argparse.ArgumentParser:
     catalog.add_argument("--phases", default="Pg,Sg,Pn,Sn")
     catalog.add_argument("--model", default="pnsn-v3")
     catalog.add_argument("--device", default="cpu")
-    catalog.add_argument("--association-method", choices=["simple", "gamma"], default="simple")
+    catalog.add_argument("--association-method", choices=["simple", "gamma"], default="gamma")
+    catalog.add_argument("--smoke-test-simple", action="store_true", help="Allow the simple time-window associator for tiny smoke tests")
     catalog.add_argument("--min-picks-per-eq", type=int, default=5)
     catalog.add_argument("--min-p-picks-per-eq", type=int, default=3)
     catalog.add_argument("--min-s-picks-per-eq", type=int, default=0)
+    catalog.add_argument("--association-min-depth", type=float, default=0.0)
+    catalog.add_argument("--association-max-depth", type=float, default=30.0)
     catalog.add_argument("--location-method", choices=["grid", "bayes"], default="grid")
     catalog.add_argument("--location-min-picks", type=int, default=4)
     catalog.add_argument("--bayes-repo")

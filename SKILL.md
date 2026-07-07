@@ -18,8 +18,8 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
 ## Workflow
 
 1. Confirm inputs: waveform directory, station metadata, response or StationXML if ML is required, velocity model, desired phases, and preferred association/location engines.
-2. For a one-shot baseline earthquake detection-to-catalog run, use the end-to-end wrapper. Use `--association-method gamma` when GaMMA is installed; use the default `simple` method only for smoke tests or tiny examples:
-   `python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
+2. For a one-shot production-oriented earthquake detection-to-catalog run, use the end-to-end wrapper with GaMMA when it is installed. Use `--association-method simple --smoke-test-simple` only for smoke tests or tiny examples:
+   `python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --association-method gamma --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
 3. For controlled production work, scan waveforms first:
    `python scripts/seismicx_catalog.py scan -w <waveforms> -o work/waveforms.csv --errors work/waveform_errors.csv`
 4. Inspect bundled models when needed:
