@@ -4,19 +4,30 @@
 
 Agent-friendly workflows and helper tools for full earthquake detection and automatic catalog production from local seismic waveform archives. The package is usable from Codex-style skills, OpenCode `AGENTS.md`, Claude Code `CLAUDE.md`, or any agent that can read Markdown instructions and run local scripts.
 
+## Supported Agent Tools
+
+This skill is not limited to OpenCode. It is designed to work with multiple agent tools:
+
+- Codex or Codex-style skill runners: use `SKILL.md` as the canonical skill file.
+- OpenCode and other agents that read repository instructions: use `AGENTS.md`.
+- Claude Code: use `CLAUDE.md`.
+- Generic local coding agents: read `SKILL.md` first, then use the bundled script and references as needed.
+
 ## Install The Skill
 
-In OpenCode, start a session and type:
+In OpenCode, Codex, or another agent that can clone repositories, start a session and type:
 
 ```text
 Download https://github.com/cangyeone/seismicx-catalog-skill and install it as a SKILL.
 ```
 
-The agent should clone this repository, keep `SKILL.md` in the skill root, and place the folder where OpenCode can load user skills. Other agent systems can use the same repository directly because the root also includes `AGENTS.md` and `CLAUDE.md`.
+The agent should clone this repository, keep `SKILL.md` in the skill root, and place the folder where that tool loads user skills. For Codex-style tools, the important file is `SKILL.md`. For OpenCode-style tools, the repository also provides `AGENTS.md`. For Claude Code, the repository provides `CLAUDE.md`.
 
-## Use It In OpenCode
+If the tool supports manual installation, clone the repository into its user-skill directory and keep the repository layout unchanged.
 
-After installation, open a project directory that contains your seismic data and type:
+## Use It In An Agent
+
+After installation, open a project directory that contains your seismic data and type the same kind of request in OpenCode, Codex, Claude Code, or another local coding agent:
 
 ```text
 Based on the data in the current directory, build an earthquake catalog.
