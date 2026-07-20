@@ -17,6 +17,8 @@ Use this checklist before returning a catalog or publishing derived figures.
 - Plot event origin times or inter-event times to detect artificial bursts.
 - Inspect rejected picks when the rejected fraction is high.
 - Compare REAL and GaMMA on a short time window when both are available.
+- For REAL, report picks skipped because station metadata are missing, the score threshold, `R/S/V` parameters, residual scatter, P/S balance, stations with both phases, and azimuth gap.
+- Flag REAL events on the maximum-depth boundary and rerun a reviewed window with at least one alternate score or count threshold before final delivery.
 
 ## Location QC
 

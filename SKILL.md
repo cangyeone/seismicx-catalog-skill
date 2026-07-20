@@ -26,11 +26,14 @@ Use this repository as a generic agent skill. `SKILL.md` is the canonical workfl
    `python scripts/seismicx_catalog.py list-models`
 5. Pick phases. Let the user choose phases such as `Pg,Sg,Pn,Sn`; use the bundled `pnsn-v3` model by default. Do not apply bandpass, highpass, or lowpass filtering to continuous waveforms before or during phase picking. Use `classic` only as a no-model smoke-test fallback:
    `python scripts/seismicx_catalog.py pick -w <waveforms> -o work/picks.csv --picker torchscript-pnsn --model pnsn-v3 --phases Pg,Sg,Pn,Sn`
-6. If REAL, HASH, pnsn, `bayes_location`, or `seismological-ai-tools` are needed locally, download/build them before the dependent step:
+6. The bundled Python REAL backend runs directly from the standard station and pick CSV files and does not require compilation. If compiled C REAL, HASH, pnsn, `bayes_location`, or `seismological-ai-tools` are needed locally, download/build them before the dependent step:
    `python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json`
    Use `--tool real` without `--skip-build` to compile REAL when `gfortran` is available. Use `--tool hash --hash-source ./pyhash` only when a local HASH/pyhash source tree is present.
 7. Associate picks with the user's selected engine and always write associated picks with `event_id`:
    `python scripts/seismicx_catalog.py associate --method gamma -p work/picks.csv -s stations.csv -o work/events_gamma.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv`
+   For the bundled homogeneous-velocity REAL backend, run:
+   `python scripts/seismicx_catalog.py associate --method real -p work/picks.csv -s stations.csv -o work/events_real.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv --real-R 0.5/20/0.05/2/5 --real-S 3/2/5/2/0.5/0.1/1.5 --real-V 6.2/3.5`
+   Set `--real-min-score` for dense AI picks and QC unmatched station metadata, residuals, azimuth gaps, and solutions on the depth boundary. Use compiled C REAL through `--real-command` when a layered travel-time table is required.
 8. Recompute or QC first motion on associated picks:
    `python scripts/seismicx_catalog.py polarity -p work/picks_associated.csv -o work/picks_with_polarity.csv`
 9. Locate associated events. Always require a velocity model for production work. Use the grid solver for a baseline, or export/run `cangyeone/bayes_location` through `--method bayes` when the user requests it:

@@ -67,7 +67,7 @@ This repository packages a publishable, agent-agnostic skill for the full earthq
 
 - Analyze waveform directory structure and scan MSEED, SAC, SEED, and other ObsPy-readable formats.
 - Detect earthquake phases and pick user-selected arrivals such as Pg/Sg/Pn/Sn with the bundled SeismicX PNSN TorchScript model. Continuous-waveform picking is intentionally unfiltered; the classic picker is only a smoke-test fallback.
-- Associate picks with GaMMA or REAL, with local build support for REAL.
+- Associate picks with GaMMA or the bundled optimized Python REAL backend; optionally build C REAL for layered travel-time tables.
 - Locate events with an explicit velocity model, including a hook for `cangyeone/bayes_location`.
 - Calculate local magnitude ML with seedtools-style response simulation, horizontal-component amplitude measurement, regional R curves, and station-level outputs.
 - Summarize seismic activity and plot locations with Cartopy when available.
@@ -81,6 +81,7 @@ AGENTS.md
 CLAUDE.md
 agents/openai.yaml
 scripts/seismicx_catalog.py
+scripts/seismicx_real.py
 references/
 assets/
 logo.png
@@ -107,9 +108,21 @@ python scripts/seismicx_catalog.py catalog \
 
 The final merged catalog is written to `work/catalog_run/catalog_final.csv` and includes detected events, associated phases, locations, ML, and focal-mechanism columns when enough data are available. Use `--association-method simple --smoke-test-simple` only for tiny smoke tests that intentionally use the simple time-window associator.
 
+Use the bundled Python REAL backend in the complete workflow with:
+
+```bash
+python scripts/seismicx_catalog.py catalog \
+  -w <waveforms> \
+  -s stations.csv \
+  -v velocity_model.csv \
+  -o work/catalog_run \
+  --association-method real \
+  --real-min-score 0.2
+```
+
 ## Dependencies
 
-Core waveform operations require ObsPy. The bundled PNSN picker requires PyTorch. Production association uses GaMMA, which can be installed into the active environment with:
+Core waveform operations require ObsPy. The bundled PNSN picker requires PyTorch. The bundled Python REAL backend requires NumPy and uses Numba automatically when available. GaMMA can be installed into the active environment with:
 
 ```bash
 python -m pip install "git+https://github.com/wayneweiqiang/GaMMA.git"
@@ -134,6 +147,24 @@ python scripts/seismicx_catalog.py locate -p work/picks_with_polarity.csv -s sta
 python scripts/seismicx_catalog.py magnitude-ml -e work/events_located.csv -p work/picks_with_polarity.csv -s stations.csv --inventory stations.xml --region R13 -o work/events_ml.csv --station-output work/station_ml.csv
 python scripts/seismicx_catalog.py mechanism -e work/events_ml.csv -p work/picks_with_polarity.csv -s stations.csv -o work/mechanisms.csv --catalog-output work/catalog_final.csv --hash-input work/hash_input.csv
 ```
+
+REAL can be selected without downloading or compiling another repository:
+
+```bash
+python scripts/seismicx_catalog.py associate \
+  --method real \
+  -p work/picks.csv \
+  -s stations.csv \
+  -o work/events_real.csv \
+  --assignments work/assignments.csv \
+  --associated-picks work/picks_associated.csv \
+  --workdir work/real \
+  --real-R 0.5/20/0.05/2/5 \
+  --real-S 3/2/5/2/0.5/0.1/1.5 \
+  --real-V 6.2/3.5
+```
+
+`events_real.csv` includes residual scatter, P/S counts, stations with both phases, and azimuth gap. `work/real/real_run.json` records the parameters, skipped/usable pick counts, runtime, and whether Numba acceleration was active. For dense AI picks, tune `--real-min-score` and the `S` thresholds against a reviewed time window. Use compiled C REAL through `--real-command` when a layered `-G` travel-time table is required.
 
 Do not bandpass, highpass, or lowpass continuous waveforms before the `pick` or `catalog` phase-detection step. The bundled PNSN model expects the original waveform stream. Filtering is only an explicit non-default option for classic STA/LTA smoke tests and for later response/magnitude processing.
 

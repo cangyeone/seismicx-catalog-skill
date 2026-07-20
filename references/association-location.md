@@ -13,12 +13,40 @@ Use GaMMA when:
 Use REAL when:
 
 - The user wants a proven rapid association/location workflow with explicit travel-time windows.
-- A local REAL binary can be compiled.
+- The user wants a transparent homogeneous-velocity backend that runs directly from canonical CSV, or a compiled REAL deployment with a regional travel-time table.
 - The user can provide regional `R`, `G`, `V`, and `S` parameters and a suitable station/pick conversion.
 
 Use the helper's `simple` method only as a smoke test for tiny examples. Do not present it as a scientific association method.
 
-## Building REAL
+## Running The Bundled Python REAL
+
+The default REAL path is implemented in `scripts/seismicx_real.py`. It consumes canonical pick and station CSV files, maps `Pg/Pn` to P and `Sg/Sn` to S, uses UTC pick times, performs REAL-style grid association/location, and writes canonical events, assignments, and associated picks:
+
+```bash
+python scripts/seismicx_catalog.py associate \
+  --method real \
+  -p work/picks.csv \
+  -s stations.csv \
+  -o work/events_real.csv \
+  --assignments work/assignments.csv \
+  --associated-picks work/picks_associated.csv \
+  --workdir work/real \
+  --real-R 0.5/20/0.05/2/5 \
+  --real-S 3/2/5/2/0.5/0.1/1.5 \
+  --real-V 6.2/3.5
+```
+
+Parameter order follows REAL:
+
+- `R`: `rx/rh/dx/dh/tint[/gap/GCarc/latref/lonref]`.
+- `S`: `minP/minS/minTotal/minBoth/std/dtps/nrt[/rsel]`.
+- `V`: `vp/vs[/surface_vp/surface_vs/elevation_flag]`.
+
+NumPy is required. Numba is optional but strongly recommended for one-hour or larger runs. The run writes `real_run.json` with parameters, pick counts, timing, and acceleration status. The event CSV also records P/S counts, stations with both phases, and azimuth gap.
+
+Use `--real-min-score` to control dense AI pick input. Report picks skipped because station metadata are missing. Flag events at the maximum depth, events with poor azimuth coverage, and parameter-sensitive events. Compare at least two score/threshold settings before treating a dense automatic catalog as final.
+
+## Building Compiled REAL
 
 The helper can clone and build REAL into a local tools directory:
 
@@ -31,7 +59,7 @@ python scripts/seismicx_catalog.py build-tools \
 
 If the automatic Makefile search fails, inspect `external/REAL`, read its README/user guide, install `gfortran`, and run the repository's documented build command manually. Record the executable path in `work/build_manifest.json` or final notes.
 
-REAL command execution is project-specific because different deployments convert picks into REAL input files differently. The helper prepares a workspace and can run a template:
+Compiled REAL command execution is project-specific because deployments differ in pick conversion and travel-time tables. Pass an adapter template with `--real-command`; this switches off the bundled Python backend:
 
 ```bash
 python scripts/seismicx_catalog.py associate \
@@ -42,6 +70,8 @@ python scripts/seismicx_catalog.py associate \
   --workdir work/real \
   --real-command "<REAL command using {workdir} {stations} {picks} {output} {R} {G} {V} {S}>"
 ```
+
+Use this path for layered `-G` travel-time tables. The bundled Python backend currently uses the homogeneous `-V` model and does not silently pretend to consume `-G`.
 
 ## Running GaMMA
 

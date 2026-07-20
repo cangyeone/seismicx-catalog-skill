@@ -194,6 +194,68 @@ def test_gamma_assignment_mapping(tmp: Path) -> None:
     assert rows[1]["event_id"] == "ev000001"
 
 
+def test_real_chain(tmp: Path) -> None:
+    stations = tmp / "stations_real.csv"
+    picks = tmp / "picks_real.csv"
+    events_path = tmp / "events_real.csv"
+    assignments_path = tmp / "assignments_real.csv"
+    associated_path = tmp / "picks_real_assoc.csv"
+    write_stations(stations)
+    write_synthetic_picks(picks)
+
+    completed = run(
+        [
+            "associate",
+            "--method",
+            "real",
+            "-p",
+            str(picks),
+            "-s",
+            str(stations),
+            "-o",
+            str(events_path),
+            "--assignments",
+            str(assignments_path),
+            "--associated-picks",
+            str(associated_path),
+            "--workdir",
+            str(tmp / "real_work"),
+            "--real-R",
+            "0.2/10/0.05/2/3/360/1/30/100",
+            "--real-S",
+            "3/2/6/2/0.8/0.1/1.5",
+            "--real-V",
+            "6.0/3.5/5.0/2.8",
+            "--real-jobs",
+            "2",
+        ]
+    )
+    events = list(csv.DictReader(events_path.open(encoding="utf-8")))
+    assignments = list(csv.DictReader(assignments_path.open(encoding="utf-8")))
+    associated = list(csv.DictReader(associated_path.open(encoding="utf-8")))
+    assert len(events) == 1, (events, completed.stderr)
+    assert events[0]["event_id"] == "ev000001"
+    assert abs(float(events[0]["latitude"]) - 30.0) <= 0.051, events[0]
+    assert abs(float(events[0]["longitude"]) - 100.0) <= 0.060, events[0]
+    assert abs((dt.datetime.fromisoformat(events[0]["origin_time"].replace("Z", "+00:00")) - dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc)).total_seconds()) <= 0.25
+    assert len(assignments) == 10, assignments
+    assert {row["event_id"] for row in associated} == {"ev000001"}
+    assert (tmp / "real_work" / "real_run.json").exists()
+
+    invalid = run(
+        [
+            "associate", "--method", "real", "-p", str(picks), "-s", str(stations),
+            "-o", str(tmp / "events_real_invalid.csv"),
+            "--real-R", "0.2/10/0.05/2/3/360/1/30",
+            "--real-S", "3/2/6/2/0.8/0.1/1.5",
+            "--real-V", "6.0/3.5",
+        ],
+        check=False,
+    )
+    assert invalid.returncode == 2
+    assert "requires both latitude and longitude" in invalid.stderr
+
+
 def test_fail_fast_and_bayes_export(tmp: Path) -> None:
     stations = tmp / "stations_failfast.csv"
     velocity = tmp / "velocity_failfast.csv"
@@ -268,6 +330,7 @@ def main() -> int:
         run(["list-models", "--json"])
         test_gamma_chain(tmp)
         test_gamma_assignment_mapping(tmp)
+        test_real_chain(tmp)
         test_fail_fast_and_bayes_export(tmp)
         test_pnsn_waveform_path_keeps_all_sources(tmp)
         print(f"smoke tests passed in {tmp}")

@@ -82,6 +82,13 @@ EVENT_FIELDS = [
     "method",
 ]
 
+REAL_EVENT_FIELDS = EVENT_FIELDS + [
+    "n_p_picks",
+    "n_s_picks",
+    "n_both_stations",
+    "azimuth_gap_deg",
+]
+
 MECHANISM_FIELDS = [
     "event_id",
     "mechanism_strike",
@@ -1220,7 +1227,7 @@ def cmd_associate_gamma(args: argparse.Namespace) -> int:
 
 
 def prepare_real_workspace(args: argparse.Namespace) -> dict[str, str]:
-    workdir = Path(args.workdir)
+    workdir = Path(args.workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     picks = read_csv_rows(args.picks)
     stations = read_stations(args.stations)
@@ -1228,35 +1235,186 @@ def prepare_real_workspace(args: argparse.Namespace) -> dict[str, str]:
     pick_path = workdir / "picks.csv"
     write_csv_rows(station_path, [asdict(sta) for sta in canonical_station_values(stations)], STATION_FIELDS)
     write_csv_rows(pick_path, picks, PICK_FIELDS)
-    return {"workdir": str(workdir), "stations": str(station_path), "picks": str(pick_path), "output": str(args.output)}
+    return {
+        "workdir": str(workdir),
+        "stations": str(station_path.resolve()),
+        "picks": str(pick_path.resolve()),
+        "output": str(Path(args.output).resolve()),
+    }
 
 
 def cmd_associate_real(args: argparse.Namespace) -> int:
-    placeholders = prepare_real_workspace(args)
-    placeholders.update({"R": args.real_R, "G": args.real_G, "V": args.real_V, "S": args.real_S})
-    if not args.real_command:
-        note_path = Path(args.workdir) / "REAL_COMMAND_TEMPLATE.txt"
-        note_path.write_text(
-            textwrap.dedent(
-                f"""\
-                REAL workspace prepared.
-
-                stations: {placeholders['stations']}
-                picks: {placeholders['picks']}
-                output: {placeholders['output']}
-
-                Re-run with --real-command once your local REAL binary and
-                input conversion template are available. The command template
-                may use placeholders: {{workdir}}, {{stations}}, {{picks}},
-                {{output}}, {{R}}, {{G}}, {{V}}, {{S}}.
-                """
-            ),
-            encoding="utf-8",
-        )
-        eprint(f"REAL workspace prepared at {args.workdir}; no command executed.")
+    if args.real_command:
+        placeholders = prepare_real_workspace(args)
+        placeholders.update({"R": args.real_R, "G": args.real_G, "V": args.real_V, "S": args.real_S})
+        command = args.real_command.format(**placeholders)
+        subprocess.run(command, shell=True, cwd=args.workdir, check=True)
         return 0
-    command = args.real_command.format(**placeholders)
-    subprocess.run(command, shell=True, cwd=args.workdir, check=True)
+
+    try:
+        from seismicx_real import RealConfig, RealError, RealPick, RealStation, associate_real
+    except ImportError:
+        try:
+            from scripts.seismicx_real import RealConfig, RealError, RealPick, RealStation, associate_real
+        except ImportError as exc:
+            raise CatalogError("The bundled Python REAL backend requires NumPy.") from exc
+
+    picks = read_csv_rows(args.picks)
+    parsed_stations = read_stations(args.stations)
+    canonical_stations = canonical_station_values(parsed_stations)
+    if not canonical_stations:
+        raise CatalogError("No stations are available for REAL association.")
+
+    real_stations = [
+        RealStation(
+            network=station.network,
+            station=station.station,
+            location=station.location,
+            longitude=station.longitude,
+            latitude=station.latitude,
+            elevation_km=station.elevation_m / 1000.0,
+        )
+        for station in canonical_stations
+    ]
+    exact_station_indices = {
+        station_id(station.network, station.station, station.location): index
+        for index, station in enumerate(canonical_stations)
+    }
+    network_station_indices: dict[str, list[int]] = defaultdict(list)
+    for index, station in enumerate(canonical_stations):
+        network_station_indices[station_id(station.network, station.station)].append(index)
+
+    real_picks: list[RealPick] = []
+    skipped_station = 0
+    skipped_phase = 0
+    for index, row in enumerate(picks):
+        exact_id = station_id(row.get("network", ""), row.get("station", ""), row.get("location", ""))
+        station_index = exact_station_indices.get(exact_id)
+        if station_index is None:
+            candidates = network_station_indices.get(station_id(row.get("network", ""), row.get("station", "")), [])
+            if len(candidates) == 1:
+                station_index = candidates[0]
+        if station_index is None:
+            skipped_station += 1
+            continue
+        phase = phase_group(row.get("phase", ""))
+        if phase not in {"P", "S"}:
+            skipped_phase += 1
+            continue
+        real_picks.append(
+            RealPick(
+                original_index=index,
+                pick_id=row.get("pick_id") or f"p{index + 1:08d}",
+                station_index=station_index,
+                phase=phase,
+                time=to_epoch_seconds(row["time"]),
+                score=parse_float(row.get("score"), 1.0),
+                amplitude=parse_float(row.get("amplitude"), 0.0),
+            )
+        )
+    if not real_picks:
+        raise CatalogError("No P/S picks matched the station table for REAL association.")
+
+    active_station_indices = sorted({pick.station_index for pick in real_picks})
+    station_remap = {old_index: new_index for new_index, old_index in enumerate(active_station_indices)}
+    real_stations = [real_stations[index] for index in active_station_indices]
+    real_picks = [
+        RealPick(
+            original_index=pick.original_index,
+            pick_id=pick.pick_id,
+            station_index=station_remap[pick.station_index],
+            phase=pick.phase,
+            time=pick.time,
+            score=pick.score,
+            amplitude=pick.amplitude,
+        )
+        for pick in real_picks
+    ]
+
+    try:
+        config = RealConfig.from_real_strings(
+            args.real_R,
+            args.real_S,
+            args.real_V,
+            min_score=args.real_min_score,
+            jobs=args.real_jobs,
+        )
+        result = associate_real(real_stations, real_picks, config)
+    except RealError as exc:
+        raise CatalogError(str(exc)) from exc
+
+    associated = [dict(row) for row in picks]
+    event_rows: list[dict[str, Any]] = []
+    assignment_rows: list[dict[str, Any]] = []
+    for event_number, event in enumerate(result.events, start=1):
+        event_id = f"ev{event_number:06d}"
+        event_rows.append(
+            {
+                "event_id": event_id,
+                "origin_time": datetime_to_text(datetime.fromtimestamp(event.origin_time, tz=timezone.utc)),
+                "latitude": f"{event.latitude:.6f}",
+                "longitude": f"{event.longitude:.6f}",
+                "depth_km": f"{event.depth_km:.3f}",
+                "magnitude": "",
+                "magnitude_type": "",
+                "rms": f"{event.rms_s:.4f}",
+                "n_picks": event.n_picks,
+                "method": "REAL-python-homogeneous",
+                "n_p_picks": event.n_p,
+                "n_s_picks": event.n_s,
+                "n_both_stations": event.n_both,
+                "azimuth_gap_deg": f"{event.azimuth_gap_deg:.2f}",
+            }
+        )
+        for assignment in sorted(event.assignments, key=lambda item: (item.time, item.original_index)):
+            associated[assignment.original_index]["event_id"] = event_id
+            station = real_stations[assignment.station_index]
+            assignment_rows.append(
+                {
+                    "event_id": event_id,
+                    "pick_id": assignment.pick_id,
+                    "pick_index": assignment.original_index,
+                    "station_id": station.station_id,
+                    "time": associated[assignment.original_index].get("time", ""),
+                    "phase": associated[assignment.original_index].get("phase", assignment.phase),
+                    "residual_s": f"{assignment.residual_s:.4f}",
+                    "score": f"{assignment.score:.6g}",
+                    "azimuth_deg": f"{assignment.azimuth_deg:.2f}",
+                }
+            )
+
+    write_csv_rows(args.output, event_rows, REAL_EVENT_FIELDS)
+    if args.assignments:
+        write_csv_rows(
+            args.assignments,
+            assignment_rows,
+            ["event_id", "pick_id", "pick_index", "station_id", "time", "phase", "residual_s", "score", "azimuth_deg"],
+        )
+    if args.associated_picks:
+        write_csv_rows(args.associated_picks, associated, PICK_FIELDS)
+    ensure_parent(Path(args.workdir) / "real_run.json")
+    (Path(args.workdir) / "real_run.json").write_text(
+        json.dumps(
+            {
+                "R": args.real_R,
+                "S": args.real_S,
+                "V": args.real_V,
+                "input_rows": len(picks),
+                "active_stations": len(real_stations),
+                "skipped_station": skipped_station,
+                "skipped_phase": skipped_phase,
+                **asdict(result.stats),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    eprint(
+        f"real_events={len(event_rows)} real_assignments={len(assignment_rows)} "
+        f"usable_picks={result.stats.usable_picks} skipped_station={skipped_station} "
+        f"skipped_phase={skipped_phase} elapsed_s={result.stats.elapsed_s:.3f} "
+        f"numba={result.stats.numba_enabled}"
+    )
     return 0
 
 
@@ -2296,6 +2454,23 @@ def cmd_catalog(args: argparse.Namespace) -> int:
         "--max-depth",
         str(args.association_max_depth),
     ]
+    if args.association_method == "real":
+        associate_cmd.extend(
+            [
+                "--real-R",
+                args.real_R,
+                "--real-S",
+                args.real_S,
+                "--real-V",
+                args.real_V,
+                "--real-min-score",
+                str(args.real_min_score),
+                "--real-jobs",
+                str(args.real_jobs),
+                "--workdir",
+                str(output_dir / "real_work"),
+            ]
+        )
     run_logged(base + associate_cmd)
 
     run_logged(base + ["polarity", "-p", str(picks_associated), "-o", str(picks_polarity), "--min-score", str(args.polarity_min_score)])
@@ -2465,12 +2640,14 @@ def build_parser() -> argparse.ArgumentParser:
     associate.add_argument("--assignments")
     associate.add_argument("--associated-picks", help="Write picks with event_id populated after association")
     associate.add_argument("--method", choices=["gamma", "real", "simple"], default="gamma")
-    associate.add_argument("--workdir", default="real_work")
-    associate.add_argument("--real-command")
-    associate.add_argument("--real-R", default="0.5/20/0.05/2/5")
-    associate.add_argument("--real-G", default="2.0/20/0.01/1")
-    associate.add_argument("--real-V", default="6.2/3.5")
-    associate.add_argument("--real-S", default="3/2/4/2/0.5/0.1/1.5")
+    associate.add_argument("--workdir", default="real_work", help="REAL run metadata directory or external-command workspace")
+    associate.add_argument("--real-command", help="Run an external REAL adapter command instead of the bundled Python backend")
+    associate.add_argument("--real-R", default="0.5/20/0.05/2/5", help="REAL rx/rh/dx/dh/tint[/gap/GCarc/latref/lonref]")
+    associate.add_argument("--real-G", default="2.0/20/0.01/1", help="Travel-time table parameters for --real-command only")
+    associate.add_argument("--real-V", default="6.2/3.5", help="REAL vp/vs[/surface_vp/surface_vs/elevation_flag]")
+    associate.add_argument("--real-S", default="3/2/5/2/0.5/0.1/1.5", help="REAL minP/minS/minTotal/minBoth/std/dtps/nrt[/rsel]")
+    associate.add_argument("--real-min-score", type=float, default=0.0, help="Ignore REAL input picks below this confidence")
+    associate.add_argument("--real-jobs", type=int, default=max(1, min(os.cpu_count() or 1, 8)), help="Numba worker threads for bundled Python REAL")
     associate.add_argument("--vp", type=float, default=6.0)
     associate.add_argument("--vs", type=float, default=3.5)
     associate.add_argument("--gamma-method", default="BGMM")
@@ -2589,13 +2766,18 @@ def build_parser() -> argparse.ArgumentParser:
     catalog.add_argument("--phases", default="Pg,Sg,Pn,Sn")
     catalog.add_argument("--model", default="pnsn-v3")
     catalog.add_argument("--device", default="cpu")
-    catalog.add_argument("--association-method", choices=["simple", "gamma"], default="gamma")
+    catalog.add_argument("--association-method", choices=["simple", "gamma", "real"], default="gamma")
     catalog.add_argument("--smoke-test-simple", action="store_true", help="Allow the simple time-window associator for tiny smoke tests")
     catalog.add_argument("--min-picks-per-eq", type=int, default=5)
     catalog.add_argument("--min-p-picks-per-eq", type=int, default=3)
     catalog.add_argument("--min-s-picks-per-eq", type=int, default=0)
     catalog.add_argument("--association-min-depth", type=float, default=0.0)
     catalog.add_argument("--association-max-depth", type=float, default=30.0)
+    catalog.add_argument("--real-R", default="0.5/20/0.05/2/5")
+    catalog.add_argument("--real-V", default="6.2/3.5")
+    catalog.add_argument("--real-S", default="3/2/5/2/0.5/0.1/1.5")
+    catalog.add_argument("--real-min-score", type=float, default=0.0)
+    catalog.add_argument("--real-jobs", type=int, default=max(1, min(os.cpu_count() or 1, 8)))
     catalog.add_argument("--location-method", choices=["grid", "bayes"], default="grid")
     catalog.add_argument("--location-min-picks", type=int, default=4)
     catalog.add_argument("--bayes-repo")

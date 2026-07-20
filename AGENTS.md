@@ -15,6 +15,7 @@ This repository is an agent-agnostic skill for the full earthquake detection-to-
 ```bash
 python scripts/seismicx_catalog.py list-models
 python scripts/seismicx_catalog.py catalog -w <waveforms> -s stations.csv -v velocity_model.csv -o work/catalog_run --association-method gamma
+python scripts/seismicx_catalog.py associate --method real -p work/picks.csv -s stations.csv -o work/events_real.csv --assignments work/assignments.csv --associated-picks work/picks_associated.csv
 python scripts/seismicx_catalog.py build-tools --tool all --tools-dir external --skip-build -o work/tools_manifest.json
 ```
 
@@ -28,7 +29,8 @@ ML magnitude calculation should follow the seedtools-style path: remove response
 
 - Install GaMMA for production association: `python -m pip install "git+https://github.com/wayneweiqiang/GaMMA.git"`.
 - Download PNSN, REAL, `bayes_location`, and `seismological-ai-tools` with `build-tools --tool all --skip-build`.
-- Compile REAL with `build-tools --tool real` when `gfortran` is available.
+- Use the bundled Python REAL backend for homogeneous-velocity association without compilation.
+- Compile REAL with `build-tools --tool real` when a C REAL binary or layered travel-time table is required.
 - Compile HASH/pyhash only from an explicit local source tree: `build-tools --tool hash --hash-source ./pyhash`.
 - Do not commit external cloned repositories, generated catalogs, raw waveform archives, compiled binaries, or large model weights.
 
